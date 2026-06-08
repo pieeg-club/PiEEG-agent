@@ -115,17 +115,39 @@ live cascade:
 | `get_channel_quality` | per-channel verdicts (good/flat/rail/noisy/line) |
 | `summarize_last` | a one-line status string |
 
-A typical exchange:
+A typical session — the copilot keeps context across turns, so follow-ups just
+work:
+
+```
+you > how's my signal looking?
+  (consulted: get_channel_quality)
+copilot > Clean. All four channels read "good", line-noise is low and overall
+quality is 1.00 — nothing flat or railing, so the indices below are
+trustworthy.
+
+you > ok, am I focused?
+  (consulted: get_neural_state)
+copilot > Focus is low for you right now (0.34) and alpha is the dominant band,
+which usually means a relaxed, eyes-resting state rather than active
+concentration.
+
+you > did anything change in the last minute?
+  (consulted: get_recent_events)
+copilot > One shift: relaxation rose to 0.74 about 40 s ago. No quality drops
+since then, so that looks like a real change rather than an artifact.
+```
+
+Right after start-up you get the honest-metrics guardrails instead of a number:
 
 ```
 you > am I focused?
   (consulted: get_neural_state)
-copilot > Your focus is sitting low for you right now (0.34) and alpha is
-dominant, which usually means a relaxed, eyes-resting state. Signal quality is
-clean on all four channels, so that reading is trustworthy.
+copilot > The stream is still warming up, so I can't give you a meaningful
+reading yet — the indices calibrate against your own range and currently sit at
+a neutral 0.50. Give it a few more seconds.
 ```
 
-The system prompt holds the copilot to the honest-metrics line: indices are
+The system prompt holds the copilot to that honest-metrics line: indices are
 within-session relative, warm-up and poor signal quality are surfaced before
 any conclusion, and every claim about the brain must come from a tool call.
 The provider layer is plain HTTP — **no vendor SDK is imported** — so swapping
@@ -183,6 +205,41 @@ outcome (executed vs previewed vs denied).
 | `apply_register_preset` | ADS1299 preset (normal / short / test / temp) | yes |
 | `start_osc` / `stop_osc` | OSC output stream (e.g. to VRChat) | yes |
 
+In the default `--allow-actions` mode (no `--execute`) the copilot can *reach*
+for an action but only ever previews it — you see exactly what it would do:
+
+```
+you > start recording
+  (consulted: start_recording)
+copilot > I held that back — this session is in dry-run mode, so I previewed
+start_recording instead of sending it. Re-run me with --execute if you want
+that to actually start the recording.
+
+you > what's the filter set to right now?
+  (consulted: server_status)
+copilot > The band-pass filter is on. I can retune it, but only as a preview
+unless you give me --execute.
+```
+
+With `--execute`, the same requests run for real and the copilot reports the
+gate's actual outcome — and a repeat of the same action is refused while it's
+on cooldown:
+
+```
+you > start recording, then drop the band-pass to 1–30 Hz
+  (consulted: start_recording, set_filter)
+copilot > Done. Recording is running (writing a CSV on the server) and the
+band-pass is now 1–30 Hz.
+
+you > actually, start a fresh recording
+  (consulted: start_recording)
+copilot > That was denied — start_recording is on cooldown for a couple more
+seconds to stop repeat actions firing back-to-back. Ask me again shortly.
+```
+
+Every attempt — previewed, executed or denied — is written to an audit log, so
+there's always a record of what the agent did or tried to do.
+
 Install the control-plane client with `pip install -e ".[server]"` (it pulls
 in `websockets`). The client is synchronous — a background reader thread that
 drops EEG data frames and demuxes the server's broadcast replies by key — so it
@@ -233,7 +290,3 @@ pieeg_agent/
     actions.py         # typed reads + gated actions facade
   __main__.py          # CLI: streams · ingest · monitor · ask · chat · control · config
 ```
-
-## License
-
-MIT — matches the sibling PiEEG-server.
