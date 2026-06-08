@@ -117,12 +117,7 @@ class LSLInlet:
 
         Returns ``True`` on success. Safe to call again to reconnect.
         """
-        from pylsl import (
-            StreamInlet,
-            proc_clocksync,
-            proc_dejitter,
-            resolve_byprop,
-        )
+        from pylsl import resolve_byprop
 
         prop = "name" if self._cfg.resolve_by == "name" else "type"
         value = self._cfg.name if prop == "name" else self._cfg.stype
@@ -135,8 +130,19 @@ class LSLInlet:
                 prop, value, self._cfg.resolve_timeout,
             )
             return False
+        return self.connect_info(results[0])
 
-        info = results[0]
+    def connect_info(self, info) -> bool:
+        """Build the inlet + ring from an already-resolved ``StreamInfo``.
+
+        This is the shared connect path used both by :meth:`resolve` and by
+        callers that pre-select a specific outlet (e.g. the EEG group out of a
+        multi-group PiEEG profile). After a successful connect the inlet
+        retargets future reconnects to this stream *by name*, so a self-heal
+        re-finds the same group rather than whatever responds first.
+        """
+        from pylsl import StreamInlet, proc_clocksync, proc_dejitter
+
         self._inlet = StreamInlet(
             info,
             max_buflen=max(1, int(round(self._cfg.ring_seconds))),
@@ -152,6 +158,11 @@ class LSLInlet:
         srate = float(full.nominal_srate())
         self._nominal_srate = srate if srate > 0 else _FALLBACK_SRATE
         self._channel_labels = _read_channel_labels(full, self._num_channels)
+
+        # Re-resolve by this exact name on reconnect (stable group selection).
+        if self._stream_name:
+            self._cfg.name = self._stream_name
+            self._cfg.resolve_by = "name"
 
         capacity = int(np.ceil(self._nominal_srate * self._cfg.ring_seconds))
         self._ring = RingBuffer(max(capacity, 1), self._num_channels)
@@ -308,3 +319,42 @@ def _read_channel_labels(info, num_channels: int) -> list[str]:
     while len(labels) < num_channels:
         labels.append(f"Ch{len(labels)}")
     return labels[:num_channels]
+
+
+# ── Multi-group discovery ──────────────────────────────────────────────────
+#
+# A PiEEG profile can publish several outlets that all advertise type "EEG"
+# (e.g. EEG_PiEEG, EOG_PiEEG, AUX_PiEEG). Resolving by type alone is therefore
+# ambiguous — it returns whichever outlet answers first. These helpers let the
+# caller see every candidate and pick the brain-EEG group deterministically.
+
+# Name fragments that signal a *non*-brain auxiliary group.
+_AUX_HINTS = ("eog", "aux", "acc", "gyro", "ppg", "trig", "marker", "temp")
+
+
+def discover_streams(timeout: float = 2.0) -> list:
+    """Return every LSL ``StreamInfo`` currently resolvable on the network."""
+    from pylsl import resolve_streams
+
+    return list(resolve_streams(timeout))
+
+
+def _eeg_score(info) -> tuple[int, int]:
+    """Rank key for an EEG candidate: (name preference, channel count).
+
+    A name beginning with ``EEG`` is the strongest signal that this is the
+    brain group; auxiliary names are demoted; ties break on channel count.
+    """
+    name = info.name().lower()
+    pref = 0
+    if name.startswith("eeg"):
+        pref += 100
+    if any(hint in name for hint in _AUX_HINTS):
+        pref -= 100
+    return (pref, int(info.channel_count()))
+
+
+def rank_eeg_streams(streams: list, stype: str = "EEG") -> list:
+    """Filter ``streams`` to the given type and rank best-EEG-group first."""
+    candidates = [s for s in streams if s.type() == stype]
+    return sorted(candidates, key=_eeg_score, reverse=True)

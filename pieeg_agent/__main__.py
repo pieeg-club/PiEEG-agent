@@ -65,6 +65,45 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Ring-buffer depth in seconds (default: 60 / env).",
     )
 
+    p_monitor = sub.add_parser(
+        "monitor",
+        help="Run the perception cascade: live band powers, state and events.",
+    )
+    p_monitor.add_argument(
+        "--name", default=None, help="LSL stream name (forces name resolution)."
+    )
+    p_monitor.add_argument(
+        "--type", dest="stype", default=None, help="LSL stream type (default: EEG)."
+    )
+    p_monitor.add_argument(
+        "--by", choices=("name", "type"), default=None,
+        help="Resolve by name, or smart-pick the EEG group by type (default).",
+    )
+    p_monitor.add_argument(
+        "--seconds", type=float, default=0.0,
+        help="How long to monitor; 0 runs until Ctrl+C (default: 0).",
+    )
+    p_monitor.add_argument(
+        "--ring-seconds", type=float, default=None,
+        help="Ring-buffer depth in seconds (default: 60 / env).",
+    )
+    p_monitor.add_argument(
+        "--mains", type=float, default=50.0,
+        help="Powerline frequency for the line-noise check (default: 50).",
+    )
+    p_monitor.add_argument(
+        "--feature-hz", type=float, default=8.0,
+        help="Feature-extraction rate in Hz (default: 8).",
+    )
+    p_monitor.add_argument(
+        "--state-hz", type=float, default=1.0,
+        help="NeuralState emit rate in Hz (default: 1).",
+    )
+    p_monitor.add_argument(
+        "--quiet", action="store_true",
+        help="Only print events, not the per-second state line.",
+    )
+
     sub.add_parser("config", help="Print the resolved configuration.")
     return parser
 
@@ -224,6 +263,130 @@ def _print_status(inlet) -> None:
     sys.stdout.flush()
 
 
+def cmd_monitor(args) -> int:
+    from .ingest import (
+        LSLInlet,
+        LSLStreamConfig,
+        discover_streams,
+        rank_eeg_streams,
+    )
+    from .perceive import CascadeConfig, PerceptionCascade
+
+    cfg = AgentConfig.from_env(
+        lsl_name=args.name,
+        lsl_type=args.stype,
+        lsl_resolve_by=args.by,
+        ring_seconds=args.ring_seconds,
+    )
+    inlet = LSLInlet(
+        LSLStreamConfig(
+            name=cfg.lsl_name,
+            stype=cfg.lsl_type,
+            resolve_by=cfg.lsl_resolve_by,
+            resolve_timeout=cfg.lsl_resolve_timeout,
+            ring_seconds=cfg.ring_seconds,
+        )
+    )
+
+    # Explicit --name forces a single unambiguous outlet; otherwise resolve by
+    # type and smart-pick the brain-EEG group out of any multi-group profile
+    # (EEG_PiEEG vs EOG_PiEEG / AUX_PiEEG, which all advertise type 'EEG').
+    connected = False
+    if cfg.lsl_resolve_by == "name":
+        print(f"Resolving LSL stream by name={cfg.lsl_name!r}\u2026")
+        connected = inlet.resolve()
+    else:
+        print(f"Discovering EEG streams ({cfg.lsl_resolve_timeout:.1f}s)\u2026")
+        ranked = rank_eeg_streams(
+            discover_streams(cfg.lsl_resolve_timeout), cfg.lsl_type
+        )
+        if ranked:
+            _print_stream_menu(ranked)
+            connected = inlet.connect_info(ranked[0])
+    if not connected:
+        print(
+            "Could not find an EEG stream. Start the producer with:\n"
+            "  pieeg-server --mock --lsl",
+            file=sys.stderr,
+        )
+        return 1
+
+    print(
+        f"\nMonitoring {inlet.stream_name!r}: {inlet.num_channels} ch @ "
+        f"{inlet.sample_rate:.0f} Hz  (mains {args.mains:.0f} Hz)\n"
+        + "-" * 78
+    )
+
+    inlet.start()
+    cascade = PerceptionCascade(
+        inlet,
+        CascadeConfig(
+            mains_hz=args.mains,
+            feature_hz=args.feature_hz,
+            state_hz=args.state_hz,
+        ),
+        on_state=None if args.quiet else _print_state_line,
+        on_event=_print_event_line,
+    )
+    cascade.start()
+
+    deadline = None if args.seconds <= 0 else time.monotonic() + args.seconds
+    try:
+        while deadline is None or time.monotonic() < deadline:
+            time.sleep(0.2)
+    except KeyboardInterrupt:
+        print("\nInterrupted.")
+    finally:
+        cascade.stop()
+        inlet.stop()
+
+    st = cascade.stats()
+    ist = inlet.stats()
+    print(
+        f"\nDone. {st['features']} feature frames \u2192 {st['states']} states "
+        f"\u2192 {st['events']} events, from {ist['samples']} samples "
+        f"({ist['lost_count']} reconnects)."
+    )
+    return 0 if st["states"] > 0 else 1
+
+
+def _print_stream_menu(ranked) -> None:
+    print(f"Found {len(ranked)} EEG-type stream(s):")
+    for i, s in enumerate(ranked):
+        marker = ">" if i == 0 else " "
+        sel = "  (selected)" if i == 0 else ""
+        print(
+            f"  {marker} {s.name():<16} {s.channel_count():>2} ch @ "
+            f"{s.nominal_srate():.0f} Hz{sel}"
+        )
+
+
+def _band_str(rel_bands: dict) -> str:
+    from .perceive import BAND_NAMES
+
+    return " ".join(f"{b[0].lower()}{rel_bands.get(b, 0.0):.2f}" for b in BAND_NAMES)
+
+
+def _print_state_line(state) -> None:
+    ts = time.strftime("%H:%M:%S", time.localtime(state.timestamp))
+    tag = "~" if state.warming_up else " "
+    qnote = (
+        "clean" if not state.bad_channels
+        else "check " + ",".join(state.bad_channels)
+    )
+    print(
+        f"{ts}{tag}| focus {state.focus:.2f} relax {state.relax:.2f} "
+        f"engage {state.engagement:.2f} | {_band_str(state.rel_bands)} "
+        f"| dom {state.dominant_band:<5} | Q {state.signal_quality:.2f} {qnote}"
+    )
+
+
+def _print_event_line(event) -> None:
+    ts = time.strftime("%H:%M:%S", time.localtime(event.timestamp))
+    mark = "!!" if event.severity == "warn" else ">>"
+    print(f"   {mark} {ts}  {event.type}  -  {event.detail}")
+
+
 # ── dispatch ───────────────────────────────────────────────────────────────
 
 
@@ -236,6 +399,8 @@ def main(argv: list[str] | None = None) -> int:
         return cmd_streams(args)
     if args.command == "ingest":
         return cmd_ingest(args)
+    if args.command == "monitor":
+        return cmd_monitor(args)
     if args.command == "config":
         return cmd_config(args)
 

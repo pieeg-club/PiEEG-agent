@@ -10,7 +10,18 @@ dependency and exposes two primitives the rest of the agent builds on:
 
 from __future__ import annotations
 
-from .lsl_inlet import LSLInlet, LSLStreamConfig
+from .lsl_inlet import (
+    LSLInlet,
+    LSLStreamConfig,
+    discover_streams,
+    rank_eeg_streams,
+)
 from .ring import RingBuffer
 
-__all__ = ["LSLInlet", "LSLStreamConfig", "RingBuffer"]
+__all__ = [
+    "LSLInlet",
+    "LSLStreamConfig",
+    "RingBuffer",
+    "discover_streams",
+    "rank_eeg_streams",
+]

@@ -6,9 +6,10 @@ high-rate signal into language-sized neural state and events, **reasons** with
 a pluggable LLM (Anthropic by default), and **acts** through PiEEG-server's
 control plane.
 
-> Status: **Phase 0 — ingestion spine.** The LSL intake, ring buffer,
-> configuration, and the provider-agnostic LLM interface are in place. The
-> reasoning loop and server actions land in later phases.
+> Status: **Phase 1 — perception cascade.** On top of the Phase 0 intake, the
+> agent now reduces the raw stream into per-channel band powers, signal-quality
+> verdicts, a smoothed ~1 Hz neural state, and debounced events — all printed
+> live, no LLM yet. The reasoning loop and server actions land in later phases.
 
 ## Why a reduction cascade
 
@@ -50,8 +51,36 @@ pieeg-agent ingest --seconds 10     # drain into the ring, print live stats
 pieeg-agent config                  # show resolved settings + provider
 ```
 
-`ingest` exits 0 only if the recent sample rate keeps up with the stream's
-nominal rate — a real end-to-end check of the high-rate consumer.
+`ingest` exits 0 only if the consumer keeps up with the stream (no losses, no
+growing backlog) — a real end-to-end check of the high-rate consumer.
+
+## Watch the brain (Phase 1)
+
+```bash
+# Terminal 1 — the producer:
+pieeg-server --mock --lsl
+
+# Terminal 2 — the perception cascade:
+pieeg-agent monitor --seconds 20          # live state + events to the console
+pieeg-agent monitor --mains 60 --quiet    # 60 Hz line-noise check, events only
+```
+
+A PiEEG profile can publish several outlets that all advertise type `EEG`
+(`EEG_PiEEG`, `EOG_PiEEG`, `AUX_PiEEG`). `monitor` discovers them all and
+auto-selects the brain-EEG group; pass `--by name --name EEG_PiEEG` to pin one.
+
+Each second prints a language-sized snapshot:
+
+```
+10:04:36 | focus 0.62 relax 0.41 engage 0.55 | d0.03 t0.01 a0.94 b0.01 g0.01 | dom Alpha | Q 1.00 clean
+   >> 10:04:48  relax_high  -  relax rose to 0.74
+   !! 10:05:02  quality_drop  -  signal quality degraded to 0.42 (Ch2)
+```
+
+A leading `~` marks the warm-up window: the focus/relax/engagement indices are
+**within-session relative** (0…1 against a rolling range), so until the signal
+has shown some spread they honestly read 0.50. They say "high for you, right
+now" — not an absolute or clinical measure.
 
 ## Configuration
 
@@ -75,10 +104,16 @@ pieeg_agent/
   config.py            # settings + provider registry
   ingest/
     ring.py            # thread-safe ring buffer (short-term memory)
-    lsl_inlet.py       # background LSL inlet thread
+    lsl_inlet.py       # background LSL inlet thread + multi-group discovery
+  perceive/
+    features.py        # T1 sliding-FFT band powers (per channel)
+    quality.py         # per-channel signal-quality verdicts
+    state.py           # T2 smoothed NeuralState (~1 Hz)
+    events.py          # T3 debounced transitions (Schmitt + min-dwell)
+    cascade.py         # the perception thread wiring it together
   llm/
     provider.py        # provider-agnostic interface (contract)
-  __main__.py          # CLI: streams · ingest · config
+  __main__.py          # CLI: streams · ingest · monitor · config
 ```
 
 ## License
