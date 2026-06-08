@@ -10,9 +10,13 @@ over that state with a provider-agnostic LLM:
     pieeg-agent monitor                    # live band powers, state and events
     pieeg-agent ask "am I focused?"        # one-shot brain question
     pieeg-agent chat                       # interactive brain copilot
+    pieeg-agent chat --allow-actions       # copilot with gated device control
+    pieeg-agent control status             # direct gated server actions
 
 ``ask`` / ``chat`` need an LLM provider configured (e.g. $ANTHROPIC_API_KEY).
-The autonomous loop and gated server actions land in later phases.
+Device actions (``control`` and ``chat --allow-actions``) talk to PiEEG-server
+over its WebSocket control plane and are gated: allowlisted, dry-run by default
+for the copilot, cooldown-limited and audited.
 """
 
 from __future__ import annotations
@@ -141,6 +145,24 @@ def _build_parser() -> argparse.ArgumentParser:
         "--ring-seconds", type=float, default=None,
         help="Ring-buffer depth in seconds (default: 60 / env).",
     )
+    common.add_argument(
+        "--allow-actions", action="store_true",
+        help="Give the copilot gated control tools (filter, recording, OSC, "
+        "register presets). Off by default \u2014 sessions are read-only.",
+    )
+    common.add_argument(
+        "--execute", action="store_true",
+        help="With --allow-actions, actually perform actions instead of just "
+        "previewing them (default: dry-run preview only).",
+    )
+    common.add_argument(
+        "--ws-url", default=None,
+        help="PiEEG-server control URL (default: ws://localhost:1616 / env).",
+    )
+    common.add_argument(
+        "--token", default=None,
+        help="Control-plane auth token, if the server requires one.",
+    )
 
     p_ask = sub.add_parser(
         "ask", parents=[common],
@@ -151,6 +173,81 @@ def _build_parser() -> argparse.ArgumentParser:
     sub.add_parser(
         "chat", parents=[common],
         help="Open an interactive chat with the brain copilot.",
+    )
+
+    # ── direct gated server control (Phase 3) ───────────────────────────
+    # Explicit, human-invoked device actions. Unlike the copilot these run for
+    # real by default (you asked); pass --dry-run to preview instead.
+    ctl_common = argparse.ArgumentParser(add_help=False)
+    ctl_common.add_argument(
+        "--ws-url", default=None,
+        help="PiEEG-server control URL (default: ws://localhost:1616 / env).",
+    )
+    ctl_common.add_argument(
+        "--token", default=None,
+        help="Control-plane auth token, if the server requires one.",
+    )
+    ctl_common.add_argument(
+        "--dry-run", action="store_true",
+        help="Preview the action (what would be sent) without performing it.",
+    )
+
+    p_control = sub.add_parser(
+        "control", help="Send a gated action to PiEEG-server (filter, recording, "
+        "OSC, register presets, webhooks).",
+    )
+    csub = p_control.add_subparsers(dest="control_cmd")
+
+    csub.add_parser(
+        "status", parents=[ctl_common],
+        help="Print the server status snapshot (read-only).",
+    )
+
+    c_filter = csub.add_parser(
+        "set-filter", parents=[ctl_common], help="Enable/disable or retune the "
+        "band-pass filter.",
+    )
+    c_filter.add_argument(
+        "--off", action="store_true", help="Disable the filter (default: enable)."
+    )
+    c_filter.add_argument(
+        "--lowcut", type=float, default=1.0, help="High-pass corner Hz (default 1)."
+    )
+    c_filter.add_argument(
+        "--highcut", type=float, default=40.0, help="Low-pass corner Hz (default 40)."
+    )
+
+    c_record = csub.add_parser(
+        "record", parents=[ctl_common], help="Start or stop server-side recording.",
+    )
+    c_record.add_argument("action", choices=("start", "stop"))
+
+    c_osc = csub.add_parser(
+        "osc", parents=[ctl_common], help="Start or stop the OSC output stream.",
+    )
+    c_osc.add_argument("action", choices=("start", "stop"))
+    c_osc.add_argument("--host", default=None, help="Destination host.")
+    c_osc.add_argument("--port", type=int, default=None, help="Destination UDP port.")
+    c_osc.add_argument(
+        "--mode", choices=("chatbox", "parameters", "both"), default=None,
+        help="OSC payload style.",
+    )
+    c_osc.add_argument(
+        "--channel", type=int, default=None,
+        help="EEG channel to send (omit for the channel average).",
+    )
+
+    c_preset = csub.add_parser(
+        "reg-preset", parents=[ctl_common], help="Apply an ADS1299 register preset.",
+    )
+    c_preset.add_argument(
+        "preset",
+        choices=("normal", "internal_short", "test_signal", "temp_sensor"),
+    )
+
+    csub.add_parser(
+        "webhooks", parents=[ctl_common],
+        help="List the server's webhook rules (read-only).",
     )
 
     sub.add_parser("config", help="Print the resolved configuration.")
@@ -436,10 +533,19 @@ def _connect_eeg_inlet(cfg):
 def _start_copilot(args):
     """Bring up inlet + cascade + copilot for the ``ask`` / ``chat`` commands.
 
-    Returns ``(copilot, inlet, cascade)`` on success or ``None`` after printing
-    an actionable error (missing stream, unconfigured provider).
+    Returns ``(copilot, inlet, cascade, client)`` on success or ``None`` after
+    printing an actionable error (missing stream, unconfigured provider,
+    unreachable control plane). ``client`` is the server control connection
+    when ``--allow-actions`` is set, otherwise ``None``.
     """
-    from .agent import Copilot, NeuralTools
+    from .agent import (
+        ACTUATOR_SYSTEM_PROMPT,
+        SAFE_ACTIONS,
+        SYSTEM_PROMPT,
+        CombinedToolset,
+        Copilot,
+        NeuralTools,
+    )
     from .llm import ProviderError, get_provider
     from .perceive import CascadeConfig, PerceptionCascade
 
@@ -460,8 +566,20 @@ def _start_copilot(args):
         print(f"LLM provider not ready: {exc}", file=sys.stderr)
         return None
 
+    # Optionally bring up the gated actuator side (also before hardware, so a
+    # bad control URL fails fast). Default sessions stay read-only.
+    client = None
+    actuator = None
+    allow_actions = getattr(args, "allow_actions", False)
+    if allow_actions:
+        actuator, client = _build_actuator(args, cfg, SAFE_ACTIONS)
+        if actuator is None:
+            return None
+
     inlet = _connect_eeg_inlet(cfg)
     if inlet is None:
+        if client is not None:
+            client.close()
         print(
             "Could not find an EEG stream. Start the producer with:\n"
             "  pieeg-server --mock --lsl",
@@ -469,9 +587,11 @@ def _start_copilot(args):
         )
         return None
 
+    mode = "control" if allow_actions else "read-only"
     print(
         f"\nCopilot ready on {inlet.stream_name!r}: {inlet.num_channels} ch @ "
-        f"{inlet.sample_rate:.0f} Hz  \u2014  {cfg.provider}:{cfg.model}"
+        f"{inlet.sample_rate:.0f} Hz  \u2014  {cfg.provider}:{cfg.model}  "
+        f"({mode})"
     )
 
     inlet.start()
@@ -484,8 +604,59 @@ def _start_copilot(args):
         print(f"Warming up ({args.warmup:.0f}s)\u2026")
         _wait_for_state(cascade, args.warmup)
 
-    copilot = Copilot(provider, NeuralTools(cascade))
-    return copilot, inlet, cascade
+    senses = NeuralTools(cascade)
+    if actuator is not None:
+        tools = CombinedToolset(senses, actuator)
+        copilot = Copilot(provider, tools, system=ACTUATOR_SYSTEM_PROMPT)
+    else:
+        copilot = Copilot(provider, senses, system=SYSTEM_PROMPT)
+    return copilot, inlet, cascade, client
+
+
+def _build_actuator(args, cfg, safe_actions):
+    """Connect the control plane and build gated actuator tools.
+
+    Returns ``(ActuatorTools, ServerControlClient)`` or ``(None, None)`` after
+    printing an error. The policy allows only the safe action set; dry-run is
+    the default unless ``--execute`` was passed.
+    """
+    from .agent import ActuatorTools
+    from .server import (
+        ActionGate,
+        ActionPolicy,
+        AuditLog,
+        ServerActions,
+        ServerControlClient,
+        ServerControlError,
+    )
+
+    ws_url = args.ws_url or cfg.ws_url
+    token = _control_token(args)
+    execute = getattr(args, "execute", False)
+    client = ServerControlClient(ws_url, token=token)
+    try:
+        welcome = client.connect()
+    except ServerControlError as exc:
+        print(
+            f"Could not reach the control plane at {ws_url}: {exc}\n"
+            "Start the server with:  pieeg-server --mock --lsl",
+            file=sys.stderr,
+        )
+        return None, None
+
+    policy = ActionPolicy.allow(*safe_actions, dry_run=not execute, cooldown_s=3.0)
+    gate = ActionGate(policy, AuditLog())
+    actions = ServerActions(client, gate)
+    verb = "EXECUTE" if execute else "dry-run preview"
+    mock = " (mock)" if welcome.get("mock") else ""
+    print(f"Control plane connected at {ws_url}{mock}  \u2014  actions: {verb}")
+    return ActuatorTools(actions), client
+
+
+def _control_token(args):
+    import os
+
+    return args.token or os.environ.get("PIEEG_WS_TOKEN")
 
 
 def _wait_for_state(cascade, timeout: float) -> None:
@@ -500,7 +671,7 @@ def cmd_ask(args) -> int:
     started = _start_copilot(args)
     if started is None:
         return 1
-    copilot, inlet, cascade = started
+    copilot, inlet, cascade, client = started
     try:
         result = copilot.ask(args.question)
     except Exception as exc:
@@ -509,6 +680,8 @@ def cmd_ask(args) -> int:
     finally:
         cascade.stop()
         inlet.stop()
+        if client is not None:
+            client.close()
 
     if result.tool_calls:
         print(f"  (consulted: {', '.join(result.tool_calls)})")
@@ -520,7 +693,7 @@ def cmd_chat(args) -> int:
     started = _start_copilot(args)
     if started is None:
         return 1
-    copilot, inlet, cascade = started
+    copilot, inlet, cascade, client = started
     print(
         "\nChatting with PiEEG Copilot. Ask about focus, relaxation, signal "
         "quality\u2026\nType 'exit' (or Ctrl+D) to quit.\n"
@@ -547,8 +720,137 @@ def cmd_chat(args) -> int:
     finally:
         cascade.stop()
         inlet.stop()
+        if client is not None:
+            client.close()
     print("Bye.")
     return 0
+
+
+def cmd_control(args) -> int:
+    """Send one explicit, gated action to PiEEG-server (or read its status)."""
+    from .server import (
+        ActionGate,
+        ActionPolicy,
+        AuditLog,
+        ServerActions,
+        ServerControlClient,
+        ServerControlError,
+    )
+
+    if not getattr(args, "control_cmd", None):
+        print(
+            "Specify a control subcommand: status, set-filter, record, osc, "
+            "reg-preset, webhooks.",
+            file=sys.stderr,
+        )
+        return 2
+
+    action_name, invoke = _resolve_control(args)
+    if invoke is None:
+        print(f"Unknown control command: {args.control_cmd}", file=sys.stderr)
+        return 2
+
+    cfg = AgentConfig.from_env()
+    ws_url = args.ws_url or cfg.ws_url
+    client = ServerControlClient(ws_url, token=_control_token(args))
+    try:
+        welcome = client.connect()
+    except ServerControlError as exc:
+        print(
+            f"Could not reach the control plane at {ws_url}: {exc}\n"
+            "Start the server with:  pieeg-server --mock --lsl",
+            file=sys.stderr,
+        )
+        return 1
+
+    mock = " (mock)" if welcome.get("mock") else ""
+    print(
+        f"Connected to {ws_url}{mock}: {welcome.get('channels', '?')} ch @ "
+        f"{welcome.get('sample_rate', '?')} Hz"
+    )
+
+    # Explicit human commands run for real by default; --dry-run previews. A
+    # read (action_name is None) needs no gate at all.
+    if action_name is None:
+        policy = ActionPolicy()
+    else:
+        policy = ActionPolicy.allow(
+            action_name, dry_run=getattr(args, "dry_run", False), cooldown_s=0.0
+        )
+    actions = ServerActions(client, ActionGate(policy, AuditLog()))
+
+    try:
+        result = invoke(actions)
+    except ServerControlError as exc:
+        print(f"  control error: {exc}", file=sys.stderr)
+        return 1
+    finally:
+        client.close()
+
+    _print_control_result(action_name, result)
+    return 0
+
+
+def _resolve_control(args):
+    """Map a control subcommand to ``(action_name, fn)``.
+
+    ``action_name`` is ``None`` for read-only commands (no gating); otherwise
+    it is the gated action name. ``fn`` takes a :class:`ServerActions` and
+    returns the result/envelope to print.
+    """
+    cmd = args.control_cmd
+    if cmd == "status":
+        return None, lambda a: a.server_info()
+    if cmd == "webhooks":
+        return None, lambda a: a.list_webhooks()
+    if cmd == "set-filter":
+        return "set_filter", lambda a: a.set_filter(
+            enabled=not args.off, lowcut=args.lowcut, highcut=args.highcut
+        )
+    if cmd == "record":
+        if args.action == "start":
+            return "start_record", lambda a: a.start_recording()
+        return "stop_record", lambda a: a.stop_recording()
+    if cmd == "osc":
+        if args.action == "start":
+            osc_cfg: dict = {}
+            for key in ("host", "mode"):
+                if getattr(args, key) is not None:
+                    osc_cfg[key] = getattr(args, key)
+            if args.port is not None:
+                osc_cfg["port"] = args.port
+            if args.channel is not None:
+                osc_cfg["channel"] = args.channel
+            return "osc_start", lambda a: a.start_osc(osc_cfg)
+        return "osc_stop", lambda a: a.stop_osc()
+    if cmd == "reg-preset":
+        return "reg_preset", lambda a: a.apply_register_preset(args.preset)
+    return None, None
+
+
+_CONTROL_MARKERS = {
+    "executed": "OK",
+    "dry_run": "DRY-RUN",
+    "denied": "DENIED",
+    "error": "ERROR",
+}
+
+
+def _print_control_result(action_name, result) -> None:
+    import json
+
+    if action_name is None:  # read-only command
+        print(json.dumps(result, indent=2))
+        return
+
+    outcome = result.get("outcome", "?")
+    marker = _CONTROL_MARKERS.get(outcome, outcome.upper())
+    reason = result.get("reason", "")
+    print(f"\n[{marker}] {action_name}" + (f"  -  {reason}" if reason else ""))
+    if outcome == "dry_run":
+        print(f"  would send: {json.dumps(result.get('would_send', {}))}")
+    elif outcome == "executed":
+        print(f"  result: {json.dumps(result.get('result', {}))}")
 
 
 def _print_stream_menu(ranked) -> None:
@@ -606,6 +908,8 @@ def main(argv: list[str] | None = None) -> int:
         return cmd_ask(args)
     if args.command == "chat":
         return cmd_chat(args)
+    if args.command == "control":
+        return cmd_control(args)
     if args.command == "config":
         return cmd_config(args)
 

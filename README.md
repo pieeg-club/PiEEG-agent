@@ -6,11 +6,12 @@ high-rate signal into language-sized neural state and events, **reasons** with
 a pluggable LLM (Anthropic by default), and **acts** through PiEEG-server's
 control plane.
 
-> Status: **Phase 2 — the conversational copilot.** The agent now reasons over
-> the live cascade: a provider-agnostic LLM (Anthropic by default) answers
-> questions about the brain by *pulling* language-sized facts through read-only
-> tools. Ask `"am I focused?"` and it consults the real neural state. Gated
-> server actions (the actuator side) land next.
+> Status: **Phase 3 — gated device actions.** The agent can now *act* on the
+> device through PiEEG-server's WebSocket control plane — set the band-pass
+> filter, start/stop recording, drive OSC output, apply register presets — and
+> every mutating call is **gated**: allowlisted, dry-run by default for the
+> copilot, cooldown-limited and audited. Use it directly (`pieeg-agent control
+> …`) or give the copilot opt-in hands (`chat --allow-actions`).
 
 ## Why a reduction cascade
 
@@ -130,6 +131,63 @@ any conclusion, and every claim about the brain must come from a tool call.
 The provider layer is plain HTTP — **no vendor SDK is imported** — so swapping
 backends is just config.
 
+## Act on the device (Phase 3)
+
+Reading the brain is free; *acting* on the device is not. The agent talks to
+PiEEG-server's WebSocket control plane (`ws://localhost:1616`) through a gate
+that enforces three independent checks and audits every attempt:
+
+- **allowlist** — only explicitly enabled actions can run (default: none),
+- **dry-run** — an allowed action is *previewed* (what would be sent), never
+  executed — the safe default for the copilot,
+- **cooldown** — a minimum interval between real executions of an action.
+
+### Direct control (explicit, human-invoked)
+
+```bash
+pieeg-server --mock --lsl                       # Terminal 1
+
+pieeg-agent control status                       # read the server snapshot
+pieeg-agent control set-filter --lowcut 1 --highcut 40
+pieeg-agent control set-filter --off --dry-run   # preview without sending
+pieeg-agent control record start                 # … and: record stop
+pieeg-agent control reg-preset test_signal       # ADS1299 square-wave self-test
+pieeg-agent control osc start --host 127.0.0.1 --port 9000
+pieeg-agent control webhooks                      # list configured rules
+```
+
+`control` runs for real by default (you asked); add `--dry-run` to preview.
+Each call prints the outcome — `[OK]`, `[DRY-RUN]`, `[DENIED]` or `[ERROR]`.
+
+### Copilot with hands (opt-in, gated)
+
+```bash
+pieeg-agent chat --allow-actions                 # dry-run preview by default
+pieeg-agent chat --allow-actions --execute       # actually perform actions
+```
+
+`--allow-actions` adds a curated, safe set of control tools to the copilot
+(filter, recording, OSC, register *presets* — raw register writes are never
+exposed). Without `--execute` the copilot can only *preview* actions, so you
+can watch what it would do before letting it do anything. A session that is
+given hands uses a stricter system prompt: act only when asked, read status
+before changing it, never retry in a loop, and always report the gate's real
+outcome (executed vs previewed vs denied).
+
+| Tool | Effect | Gated? |
+|------|--------|--------|
+| `server_status` | read sample rate, channels, filter, recording, LSL state | read-only |
+| `list_webhooks` | list configured webhook rules | read-only |
+| `set_filter` | enable/disable/retune the band-pass filter | yes |
+| `start_recording` / `stop_recording` | server-side CSV recording | yes |
+| `apply_register_preset` | ADS1299 preset (normal / short / test / temp) | yes |
+| `start_osc` / `stop_osc` | OSC output stream (e.g. to VRChat) | yes |
+
+Install the control-plane client with `pip install -e ".[server]"` (it pulls
+in `websockets`). The client is synchronous — a background reader thread that
+drops EEG data frames and demuxes the server's broadcast replies by key — so it
+matches the rest of the agent (no asyncio).
+
 ## Configuration
 
 Environment variables (all optional):
@@ -144,6 +202,7 @@ Environment variables (all optional):
 | `PIEEG_LLM_MODEL` | per provider | model id override |
 | `ANTHROPIC_API_KEY` | — | key for the default provider |
 | `PIEEG_WS_URL` | `ws://localhost:1616` | PiEEG-server control plane |
+| `PIEEG_WS_TOKEN` | — | control-plane auth token, if the server requires one |
 
 ## Layout
 
@@ -165,9 +224,14 @@ pieeg_agent/
     openai_compat.py   # OpenAI-compatible chat-completions adapter
     factory.py         # get_provider(config) — selects an adapter by kind
   agent/
-    tools.py           # read-only neural tools (pull from the cascade)
+    tools.py           # read-only neural tools (+ Toolset / CombinedToolset)
+    actuator_tools.py  # opt-in gated control tools (the agent's hands)
     copilot.py         # the tool-using conversational loop
-  __main__.py          # CLI: streams · ingest · monitor · ask · chat · config
+  server/
+    client.py          # synchronous WebSocket control client (reply demux)
+    gate.py            # allowlist / dry-run / cooldown + audit log
+    actions.py         # typed reads + gated actions facade
+  __main__.py          # CLI: streams · ingest · monitor · ask · chat · control · config
 ```
 
 ## License

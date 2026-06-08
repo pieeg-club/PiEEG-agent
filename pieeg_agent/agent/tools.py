@@ -22,12 +22,26 @@ phase and live in their own module so the boundary stays obvious.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Callable
+from typing import Any, Callable, Protocol, runtime_checkable
 
 from ..llm.provider import ToolSpec
 from ..perceive.cascade import PerceptionCascade
 
 ToolHandler = Callable[[dict], dict]
+
+
+@runtime_checkable
+class Toolset(Protocol):
+    """The minimal surface the copilot needs from any tool collection.
+
+    Both the read-only :class:`NeuralTools` and the gated actuator tools
+    implement this, so they can be merged with :class:`CombinedToolset` and
+    handed to the copilot interchangeably.
+    """
+
+    def specs(self) -> list[ToolSpec]: ...
+    def names(self) -> list[str]: ...
+    def call(self, name: str, arguments: dict | None = None) -> dict: ...
 
 
 @dataclass
@@ -260,3 +274,34 @@ def _as_int(value, default: int, *, lo: int, hi: int) -> int:
     except (TypeError, ValueError):
         return default
     return max(lo, min(hi, n))
+
+
+class CombinedToolset:
+    """Merge several toolsets into one ``specs()`` / ``call()`` surface.
+
+    Lets the copilot take, say, read-only :class:`NeuralTools` *and* the gated
+    actuator tools at once. Names are assumed unique across toolsets (the
+    senses and actuators use distinct prefixes); a call is routed to the first
+    toolset that advertises it.
+    """
+
+    def __init__(self, *toolsets: Toolset):
+        self._toolsets = toolsets
+
+    def specs(self) -> list[ToolSpec]:
+        out: list[ToolSpec] = []
+        for ts in self._toolsets:
+            out.extend(ts.specs())
+        return out
+
+    def names(self) -> list[str]:
+        out: list[str] = []
+        for ts in self._toolsets:
+            out.extend(ts.names())
+        return out
+
+    def call(self, name: str, arguments: dict | None = None) -> dict:
+        for ts in self._toolsets:
+            if name in ts.names():
+                return ts.call(name, arguments)
+        return {"error": f"unknown tool {name!r}", "available": self.names()}

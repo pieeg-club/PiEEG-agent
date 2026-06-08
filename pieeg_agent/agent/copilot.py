@@ -26,7 +26,7 @@ import logging
 from dataclasses import dataclass, field
 
 from ..llm.provider import LLMProvider, Message, Usage
-from .tools import NeuralTools
+from .tools import Toolset
 
 logger = logging.getLogger("pieeg.agent.copilot")
 
@@ -52,6 +52,21 @@ answers short and plain. If no data is available yet, say the stream is still \
 warming up rather than guessing."""
 
 
+ACTUATOR_SYSTEM_PROMPT = SYSTEM_PROMPT + """
+
+In THIS session you also have a small set of control tools that can change the \
+device (filter, recording, OSC output, register presets). Treat them with \
+care:
+- Only act when the user clearly asks you to, or when it is plainly needed to \
+answer them. Prefer the least-invasive action, and read the current status \
+before changing it.
+- Every control tool is gated. A call may come back as "dry_run" (previewed, \
+not sent), "denied" (not permitted or on cooldown) or "executed". Always read \
+that outcome and tell the user plainly what actually happened — never claim an \
+action took effect if it was only previewed or denied.
+- Do not repeat or retry an action in a loop. One attempt, then report back."""
+
+
 @dataclass
 class CopilotResult:
     """The outcome of one :meth:`Copilot.ask` call."""
@@ -68,7 +83,7 @@ class Copilot:
     def __init__(
         self,
         provider: LLMProvider,
-        tools: NeuralTools,
+        tools: Toolset,
         *,
         system: str = SYSTEM_PROMPT,
         max_tokens: int = 1024,
