@@ -114,6 +114,10 @@ class PerceptionCascade:
         with self._lock:
             return self._latest_state
 
+    def channel_labels(self) -> list[str]:
+        """The inlet's channel labels (read-only convenience for tools)."""
+        return list(self._inlet.channel_labels)
+
     def latest_band_powers(self) -> BandPowers | None:
         with self._lock:
             return self._latest_bp

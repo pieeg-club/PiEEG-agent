@@ -31,11 +31,13 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-# Native Anthropic Messages API (default provider).
+# The LLM adapters speak the providers' REST APIs over the standard library,
+# so no vendor SDK is required to use Anthropic or any OpenAI-compatible
+# backend. These extras are kept only for users who want the official SDKs
+# available alongside the agent for their own scripts.
 anthropic = [
     "anthropic>=0.40",
 ]
-# OpenAI-compatible providers (OpenAI, Groq, Together, Ollama, LM Studio, …).
 openai = [
     "openai>=1.30",
 ]

@@ -6,10 +6,11 @@ high-rate signal into language-sized neural state and events, **reasons** with
 a pluggable LLM (Anthropic by default), and **acts** through PiEEG-server's
 control plane.
 
-> Status: **Phase 1 — perception cascade.** On top of the Phase 0 intake, the
-> agent now reduces the raw stream into per-channel band powers, signal-quality
-> verdicts, a smoothed ~1 Hz neural state, and debounced events — all printed
-> live, no LLM yet. The reasoning loop and server actions land in later phases.
+> Status: **Phase 2 — the conversational copilot.** The agent now reasons over
+> the live cascade: a provider-agnostic LLM (Anthropic by default) answers
+> questions about the brain by *pulling* language-sized facts through read-only
+> tools. Ask `"am I focused?"` and it consults the real neural state. Gated
+> server actions (the actuator side) land next.
 
 ## Why a reduction cascade
 
@@ -32,9 +33,13 @@ language-sized**.
 ## Install (dev)
 
 ```bash
-pip install -e ".[anthropic]"     # default provider
-# or .[openai] for OpenAI-compatible backends (OpenAI, Groq, Together, Ollama, LM Studio)
+pip install -e .                  # core: perception + copilot (Anthropic/OpenAI via HTTP)
+pip install -e ".[server]"        # adds the PiEEG-server control-plane client (Phase 3)
 ```
+
+The LLM adapters talk to the providers over plain HTTP, so **no vendor SDK is
+required** — the default Anthropic backend and every OpenAI-compatible backend
+(OpenAI, Groq, Together, Ollama, LM Studio) work out of the box with just a key.
 
 Requires `pylsl` (pulls in the native `liblsl`). EEG perception needs no
 hardware — drive it with the mock server.
@@ -82,6 +87,49 @@ A leading `~` marks the warm-up window: the focus/relax/engagement indices are
 has shown some spread they honestly read 0.50. They say "high for you, right
 now" — not an absolute or clinical measure.
 
+## Talk to the brain (Phase 2)
+
+The copilot reasons over the same cascade. It needs an LLM provider — the
+default is Anthropic, but any OpenAI-compatible backend works (set
+`--provider`/`PIEEG_LLM_PROVIDER`), including local ones (Ollama, LM Studio)
+that need no key.
+
+```bash
+export ANTHROPIC_API_KEY=sk-…            # or use --provider ollama, etc.
+pieeg-server --mock --lsl               # Terminal 1
+
+pieeg-agent ask "am I relaxed right now?"   # one-shot question
+pieeg-agent chat                            # interactive session
+pieeg-agent ask --provider groq --model llama-3.3-70b-versatile "how's my signal?"
+```
+
+The model never sees raw EEG. It calls **read-only tools** that pull from the
+live cascade:
+
+| Tool | Returns |
+|------|---------|
+| `get_neural_state` | smoothed focus / relax / engagement, dominant band, quality |
+| `get_band_powers` | relative band powers (optionally per channel) |
+| `get_recent_events` | the debounced event log |
+| `get_channel_quality` | per-channel verdicts (good/flat/rail/noisy/line) |
+| `summarize_last` | a one-line status string |
+
+A typical exchange:
+
+```
+you > am I focused?
+  (consulted: get_neural_state)
+copilot > Your focus is sitting low for you right now (0.34) and alpha is
+dominant, which usually means a relaxed, eyes-resting state. Signal quality is
+clean on all four channels, so that reading is trustworthy.
+```
+
+The system prompt holds the copilot to the honest-metrics line: indices are
+within-session relative, warm-up and poor signal quality are surfaced before
+any conclusion, and every claim about the brain must come from a tool call.
+The provider layer is plain HTTP — **no vendor SDK is imported** — so swapping
+backends is just config.
+
 ## Configuration
 
 Environment variables (all optional):
@@ -112,8 +160,14 @@ pieeg_agent/
     events.py          # T3 debounced transitions (Schmitt + min-dwell)
     cascade.py         # the perception thread wiring it together
   llm/
-    provider.py        # provider-agnostic interface (contract)
-  __main__.py          # CLI: streams · ingest · monitor · config
+    provider.py        # provider-agnostic interface (the contract)
+    anthropic.py       # native Anthropic Messages API adapter
+    openai_compat.py   # OpenAI-compatible chat-completions adapter
+    factory.py         # get_provider(config) — selects an adapter by kind
+  agent/
+    tools.py           # read-only neural tools (pull from the cascade)
+    copilot.py         # the tool-using conversational loop
+  __main__.py          # CLI: streams · ingest · monitor · ask · chat · config
 ```
 
 ## License

@@ -1,13 +1,18 @@
 """Command-line entry point for PiEEG-agent.
 
-Phase 0 exposes the ingestion spine so you can prove the high-rate intake end
-to end against a running PiEEG-server:
+The CLI grows by phase. The ingestion spine proves the high-rate intake, the
+perception cascade reduces it to language-sized state, and the copilot reasons
+over that state with a provider-agnostic LLM:
 
-    pieeg-server --mock --lsl          # in one terminal (the producer)
-    pieeg-agent streams                # list discoverable LSL outlets
-    pieeg-agent ingest --seconds 10    # drain the stream into the ring
+    pieeg-server --mock --lsl              # the producer (one terminal)
+    pieeg-agent streams                    # list discoverable LSL outlets
+    pieeg-agent ingest --seconds 10        # drain the stream into the ring
+    pieeg-agent monitor                    # live band powers, state and events
+    pieeg-agent ask "am I focused?"        # one-shot brain question
+    pieeg-agent chat                       # interactive brain copilot
 
-Later phases add ``run`` (autonomous + copilot agent loop).
+``ask`` / ``chat`` need an LLM provider configured (e.g. $ANTHROPIC_API_KEY).
+The autonomous loop and gated server actions land in later phases.
 """
 
 from __future__ import annotations
@@ -102,6 +107,50 @@ def _build_parser() -> argparse.ArgumentParser:
     p_monitor.add_argument(
         "--quiet", action="store_true",
         help="Only print events, not the per-second state line.",
+    )
+
+    # ── conversational copilot (Phase 2) ────────────────────────────────
+    # Shared perception + LLM flags for ``ask`` and ``chat``.
+    common = argparse.ArgumentParser(add_help=False)
+    common.add_argument(
+        "--name", default=None, help="LSL stream name (forces name resolution)."
+    )
+    common.add_argument(
+        "--type", dest="stype", default=None, help="LSL stream type (default: EEG)."
+    )
+    common.add_argument(
+        "--by", choices=("name", "type"), default=None,
+        help="Resolve by name, or smart-pick the EEG group by type (default).",
+    )
+    common.add_argument(
+        "--provider", default=None,
+        help=f"LLM provider (default: env / {', '.join(sorted(PROVIDERS))}).",
+    )
+    common.add_argument(
+        "--model", default=None, help="Override the provider's default model."
+    )
+    common.add_argument(
+        "--mains", type=float, default=50.0,
+        help="Powerline frequency for the line-noise check (default: 50).",
+    )
+    common.add_argument(
+        "--warmup", type=float, default=3.0,
+        help="Seconds to fill the cascade before answering (default: 3).",
+    )
+    common.add_argument(
+        "--ring-seconds", type=float, default=None,
+        help="Ring-buffer depth in seconds (default: 60 / env).",
+    )
+
+    p_ask = sub.add_parser(
+        "ask", parents=[common],
+        help="Ask the brain copilot one question about the live state.",
+    )
+    p_ask.add_argument("question", help="The question to ask (quote it).")
+
+    sub.add_parser(
+        "chat", parents=[common],
+        help="Open an interactive chat with the brain copilot.",
     )
 
     sub.add_parser("config", help="Print the resolved configuration.")
@@ -350,6 +399,158 @@ def cmd_monitor(args) -> int:
     return 0 if st["states"] > 0 else 1
 
 
+def _connect_eeg_inlet(cfg):
+    """Resolve (by name) or discover+smart-pick (by type) the EEG inlet.
+
+    Shared by ``monitor``, ``ask`` and ``chat``. Returns a connected, *not yet
+    started* :class:`LSLInlet`, or ``None`` if no stream was found.
+    """
+    from .ingest import (
+        LSLInlet,
+        LSLStreamConfig,
+        discover_streams,
+        rank_eeg_streams,
+    )
+
+    inlet = LSLInlet(
+        LSLStreamConfig(
+            name=cfg.lsl_name,
+            stype=cfg.lsl_type,
+            resolve_by=cfg.lsl_resolve_by,
+            resolve_timeout=cfg.lsl_resolve_timeout,
+            ring_seconds=cfg.ring_seconds,
+        )
+    )
+    if cfg.lsl_resolve_by == "name":
+        print(f"Resolving LSL stream by name={cfg.lsl_name!r}\u2026")
+        return inlet if inlet.resolve() else None
+
+    print(f"Discovering EEG streams ({cfg.lsl_resolve_timeout:.1f}s)\u2026")
+    ranked = rank_eeg_streams(discover_streams(cfg.lsl_resolve_timeout), cfg.lsl_type)
+    if not ranked:
+        return None
+    _print_stream_menu(ranked)
+    return inlet if inlet.connect_info(ranked[0]) else None
+
+
+def _start_copilot(args):
+    """Bring up inlet + cascade + copilot for the ``ask`` / ``chat`` commands.
+
+    Returns ``(copilot, inlet, cascade)`` on success or ``None`` after printing
+    an actionable error (missing stream, unconfigured provider).
+    """
+    from .agent import Copilot, NeuralTools
+    from .llm import ProviderError, get_provider
+    from .perceive import CascadeConfig, PerceptionCascade
+
+    cfg = AgentConfig.from_env(
+        lsl_name=args.name,
+        lsl_type=args.stype,
+        lsl_resolve_by=args.by,
+        provider=args.provider,
+        model=args.model,
+        ring_seconds=args.ring_seconds,
+    )
+
+    # Fail fast on LLM config *before* touching hardware, so the user isn't
+    # told to plug in a headset only to hit a missing-key error afterwards.
+    try:
+        provider = get_provider(cfg)
+    except ProviderError as exc:
+        print(f"LLM provider not ready: {exc}", file=sys.stderr)
+        return None
+
+    inlet = _connect_eeg_inlet(cfg)
+    if inlet is None:
+        print(
+            "Could not find an EEG stream. Start the producer with:\n"
+            "  pieeg-server --mock --lsl",
+            file=sys.stderr,
+        )
+        return None
+
+    print(
+        f"\nCopilot ready on {inlet.stream_name!r}: {inlet.num_channels} ch @ "
+        f"{inlet.sample_rate:.0f} Hz  \u2014  {cfg.provider}:{cfg.model}"
+    )
+
+    inlet.start()
+    cascade = PerceptionCascade(inlet, CascadeConfig(mains_hz=args.mains))
+    cascade.start()
+
+    # Let the cascade fill its first analysis window so early questions have a
+    # real state to read instead of "still warming up".
+    if args.warmup > 0:
+        print(f"Warming up ({args.warmup:.0f}s)\u2026")
+        _wait_for_state(cascade, args.warmup)
+
+    copilot = Copilot(provider, NeuralTools(cascade))
+    return copilot, inlet, cascade
+
+
+def _wait_for_state(cascade, timeout: float) -> None:
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if cascade.latest_state() is not None:
+            return
+        time.sleep(0.1)
+
+
+def cmd_ask(args) -> int:
+    started = _start_copilot(args)
+    if started is None:
+        return 1
+    copilot, inlet, cascade = started
+    try:
+        result = copilot.ask(args.question)
+    except Exception as exc:
+        print(f"\nCopilot error: {exc}", file=sys.stderr)
+        return 1
+    finally:
+        cascade.stop()
+        inlet.stop()
+
+    if result.tool_calls:
+        print(f"  (consulted: {', '.join(result.tool_calls)})")
+    print("\n" + result.text)
+    return 0
+
+
+def cmd_chat(args) -> int:
+    started = _start_copilot(args)
+    if started is None:
+        return 1
+    copilot, inlet, cascade = started
+    print(
+        "\nChatting with PiEEG Copilot. Ask about focus, relaxation, signal "
+        "quality\u2026\nType 'exit' (or Ctrl+D) to quit.\n"
+    )
+    try:
+        while True:
+            try:
+                question = input("you > ").strip()
+            except (EOFError, KeyboardInterrupt):
+                print()
+                break
+            if not question:
+                continue
+            if question.lower() in ("exit", "quit", ":q"):
+                break
+            try:
+                result = copilot.ask(question)
+            except Exception as exc:
+                print(f"  copilot error: {exc}", file=sys.stderr)
+                continue
+            if result.tool_calls:
+                print(f"  (consulted: {', '.join(result.tool_calls)})")
+            print(f"\ncopilot > {result.text}\n")
+    finally:
+        cascade.stop()
+        inlet.stop()
+    print("Bye.")
+    return 0
+
+
 def _print_stream_menu(ranked) -> None:
     print(f"Found {len(ranked)} EEG-type stream(s):")
     for i, s in enumerate(ranked):
@@ -401,6 +602,10 @@ def main(argv: list[str] | None = None) -> int:
         return cmd_ingest(args)
     if args.command == "monitor":
         return cmd_monitor(args)
+    if args.command == "ask":
+        return cmd_ask(args)
+    if args.command == "chat":
+        return cmd_chat(args)
     if args.command == "config":
         return cmd_config(args)
 
