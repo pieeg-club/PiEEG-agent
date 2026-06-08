@@ -1,203 +1,324 @@
 # PiEEG-agent
 
-A provider-agnostic LLM agent that **perceives live brain activity** from
-[PiEEG-server](../PiEEG-server) over Lab Streaming Layer (LSL), reduces the
-high-rate signal into language-sized neural state and events, **reasons** with
-a pluggable LLM (Anthropic by default), and **acts** through PiEEG-server's
-control plane.
-
-> Status: **Phase 3 — gated device actions.** The agent can now *act* on the
-> device through PiEEG-server's WebSocket control plane — set the band-pass
-> filter, start/stop recording, drive OSC output, apply register presets — and
-> every mutating call is **gated**: allowlisted, dry-run by default for the
-> copilot, cooldown-limited and audited. Use it directly (`pieeg-agent control
-> …`) or give the copilot opt-in hands (`chat --allow-actions`).
-
-## Why a reduction cascade
-
-An LLM reasons in seconds and costs tokens; EEG arrives at 250–500 Hz × 8–32
-channels. Raw samples can never go in a prompt. The agent progressively trades
-temporal resolution for semantic density:
-
-| Tier | Rate | Representation | Reaches the LLM? |
-|------|------|----------------|------------------|
-| T0 raw | 250–500 Hz | float32 µV frames | never |
-| T1 features | 4–10 Hz | band powers, ratios, quality | never (aggregated) |
-| T2 state | ~1 Hz | focus / relaxation / artifacts (smoothed) | on demand |
-| T3 events | sparse | debounced transitions & epochs | **yes — primary input** |
-| T4 reasoning | on event/query | NL + tool calls | — |
-
-Three rules: **ingestion never blocks on the LLM**, **the LLM pulls via tools**
-(it is never pushed raw data), and **everything the model sees is already
-language-sized**.
-
-## Install (dev)
+**Talk to your brain.** An LLM copilot that perceives live EEG from [PiEEG](https://pieeg.com) hardware, reduces high-frequency neural signals into human-readable state, and lets you ask questions in natural language about your focus, relaxation, and signal quality.
 
 ```bash
-pip install -e .                  # core: perception + copilot (Anthropic/OpenAI via HTTP)
-pip install -e ".[server]"        # adds the PiEEG-server control-plane client (Phase 3)
+pieeg-agent chat
+you > am I focused right now?
+copilot > Focus is high for you right now (0.78) with beta dominance — looks like active concentration.
 ```
 
-The LLM adapters talk to the providers over plain HTTP, so **no vendor SDK is
-required** — the default Anthropic backend and every OpenAI-compatible backend
-(OpenAI, Groq, Together, Ollama, LM Studio) work out of the box with just a key.
+---
 
-Requires `pylsl` (pulls in the native `liblsl`). EEG perception needs no
-hardware — drive it with the mock server.
+## 🚀 Quick Start (2 minutes)
 
-## Prove the intake (Phase 0)
+**No EEG hardware needed for demo** — runs with synthetic signal.
 
 ```bash
-# Terminal 1 — the producer (synthetic EEG, no hardware):
+# 1. Install
+pip install -e .
+
+# 2. Start synthetic EEG stream (terminal 1)
 pieeg-server --mock --lsl
 
-# Terminal 2 — the agent's perception intake:
-pieeg-agent streams                 # discover LSL outlets
-pieeg-agent ingest --seconds 10     # drain into the ring, print live stats
-pieeg-agent config                  # show resolved settings + provider
+# 3. Watch live brain state (terminal 2)
+pieeg-agent monitor --seconds 20
+
+# 4. Talk to your brain (needs API key)
+export ANTHROPIC_API_KEY=sk-ant-...
+pieeg-agent ask "how's my signal quality?"
 ```
 
-`ingest` exits 0 only if the consumer keeps up with the stream (no losses, no
-growing backlog) — a real end-to-end check of the high-rate consumer.
+You'll see:
+- **`monitor`** — Live focus/relax indices, dominant frequency band, signal quality
+- **`ask`** — One-shot questions answered by Claude/GPT/Llama using perception tools
+- **`chat`** — Multi-turn conversation with memory of previous context
 
-## Watch the brain (Phase 1)
+---
+
+## 📊 What Problem Does This Solve?
+
+**The challenge**: LLMs reason in natural language at ~1 Hz. EEG arrives at 250–500 Hz × 8–32 channels = 2,000–16,000 samples/second. You can't dump raw voltages into a prompt.
+
+**The solution**: A **perception cascade** that progressively trades temporal resolution for semantic density:
+
+```
+┌─────────────┬──────────┬────────────────────────┬──────────────┐
+│ Tier        │ Rate     │ Representation         │ LLM sees it? │
+├─────────────┼──────────┼────────────────────────┼──────────────┤
+│ T0 Raw      │ 250 Hz   │ float32 µV samples     │ never        │
+│ T1 Features │   8 Hz   │ band powers, quality   │ never        │
+│ T2 State    │   1 Hz   │ focus/relax/engagement │ on demand    │
+│ T3 Events   │ ~sparse  │ "focus_high" @10:04:32 │ YES – main   │
+│ T4 Reason   │ on query │ NL questions + tools   │ —            │
+└─────────────┴──────────┴────────────────────────┴──────────────┘
+```
+
+**Three architectural rules:**
+1. **Ingestion never blocks on the LLM** — high-rate intake runs in a dedicated thread, slow downstream processing never creates backpressure
+2. **LLM pulls, never pushed** — the model calls tools to request state; it's never spammed with raw data
+3. **Everything the model sees is language-sized** — indices, events, quality verdicts, not voltage arrays
+
+This architecture is proven in production BCI systems (BrainFlow + Lab Streaming Layer) and keeps token costs sane while maintaining scientific validity.
+
+---
+
+## 🧠 Architecture: Perceive → Reason → Act
+
+```
+┌──────────────────────────────────────────────────────────────┐
+│  PiEEG-server (hardware or mock)                             │
+│    └─> Lab Streaming Layer (LSL) outlet                      │
+└────────────────────────┬─────────────────────────────────────┘
+                         │ 250 Hz × 8 channels
+                         ▼
+┌──────────────────────────────────────────────────────────────┐
+│  PERCEIVE: Ring buffer + cascade                             │
+│    • LSLInlet: chunked pulls, no backpressure                │
+│    • Features: FFT → band powers (δθαβγ), quality scores     │
+│    • State: EMA smoothing → focus/relax/engagement [0-1]     │
+│    • Events: debounced transitions ("focus_high" @timestamp) │
+└────────────────────────┬─────────────────────────────────────┘
+                         │ 1 Hz state + sparse events
+                         ▼
+┌──────────────────────────────────────────────────────────────┐
+│  REASON: LLM copilot (provider-agnostic)                     │
+│    • Tools: get_neural_state, get_band_powers, get_events    │
+│    • Providers: Anthropic, OpenAI, Groq, Ollama, LM Studio   │
+│    • No vendor SDK — plain HTTP via stdlib                   │
+└────────────────────────┬─────────────────────────────────────┘
+                         │ tool calls
+                         ▼
+┌──────────────────────────────────────────────────────────────┐
+│  ACT: Gated control plane (opt-in)                           │
+│    • WebSocket → PiEEG-server :1616                          │
+│    • Allowlist + dry-run + cooldown + audit log              │
+│    • Filter, recording, OSC, register presets                │
+└──────────────────────────────────────────────────────────────┘
+```
+
+**Why this matters:**
+- **Scientifically honest**: Indices are within-session relative, not clinical claims. Warm-up and poor signal are surfaced before giving numbers.
+- **Debuggable**: Channel-level quality verdicts, event logs with timestamps, tool call traces.
+- **Decoupled**: Swap LLM providers without changing perception. Run perception without LLM. Test with mock signal.
+- **Safe by default**: Device actions require opt-in flags and are audited.
+
+---
+
+## 📖 Usage Examples
+
+### 1. Prove the Intake (no LLM needed)
+
+Validate that your system can keep up with high-rate EEG:
 
 ```bash
-# Terminal 1 — the producer:
-pieeg-server --mock --lsl
-
-# Terminal 2 — the perception cascade:
-pieeg-agent monitor --seconds 20          # live state + events to the console
-pieeg-agent monitor --mains 60 --quiet    # 60 Hz line-noise check, events only
+pieeg-agent streams              # discover LSL outlets on network
+pieeg-agent ingest --seconds 10  # drain stream, print throughput stats
 ```
 
-A PiEEG profile can publish several outlets that all advertise type `EEG`
-(`EEG_PiEEG`, `EOG_PiEEG`, `AUX_PiEEG`). `monitor` discovers them all and
-auto-selects the brain-EEG group; pass `--by name --name EEG_PiEEG` to pin one.
+Exits with code 0 only if no samples lost and ring never overflows — a real end-to-end test.
 
-Each second prints a language-sized snapshot:
+### 2. Monitor Live State
 
+```bash
+pieeg-agent monitor
+```
+
+Prints every second:
 ```
 10:04:36 | focus 0.62 relax 0.41 engage 0.55 | d0.03 t0.01 a0.94 b0.01 g0.01 | dom Alpha | Q 1.00 clean
    >> 10:04:48  relax_high  -  relax rose to 0.74
    !! 10:05:02  quality_drop  -  signal quality degraded to 0.42 (Ch2)
 ```
 
-A leading `~` marks the warm-up window: the focus/relax/engagement indices are
-**within-session relative** (0…1 against a rolling range), so until the signal
-has shown some spread they honestly read 0.50. They say "high for you, right
-now" — not an absolute or clinical measure.
+- **Indices** — `focus`, `relax`, `engage` are 0–1 **relative to this session**, not absolute/clinical
+- **Band powers** — `d`=delta, `t`=theta, `a`=alpha, `b`=beta, `g`=gamma (normalised)
+- **Events** — `>>` marks state transitions, `!!` marks quality issues
+- **`~` prefix** — warm-up period (indices need signal variance to normalise)
 
-## Talk to the brain (Phase 2)
-
-The copilot reasons over the same cascade. It needs an LLM provider — the
-default is Anthropic, but any OpenAI-compatible backend works (set
-`--provider`/`PIEEG_LLM_PROVIDER`), including local ones (Ollama, LM Studio)
-that need no key.
+### 3. One-Shot Questions
 
 ```bash
-export ANTHROPIC_API_KEY=sk-…            # or use --provider ollama, etc.
-pieeg-server --mock --lsl               # Terminal 1
-
-pieeg-agent ask "am I relaxed right now?"   # one-shot question
-pieeg-agent chat                            # interactive session
-pieeg-agent ask --provider groq --model llama-3.3-70b-versatile "how's my signal?"
+export ANTHROPIC_API_KEY=sk-ant-...
+pieeg-agent ask "am I focused?"
+pieeg-agent ask --provider ollama --model llama3.2 "is my signal clean?"
 ```
 
-The model never sees raw EEG. It calls **read-only tools** that pull from the
-live cascade:
+Supported providers: `anthropic` (default), `openai`, `groq`, `together`, `ollama`, `lmstudio`.
 
-| Tool | Returns |
-|------|---------|
-| `get_neural_state` | smoothed focus / relax / engagement, dominant band, quality |
-| `get_band_powers` | relative band powers (optionally per channel) |
-| `get_recent_events` | the debounced event log |
-| `get_channel_quality` | per-channel verdicts (good/flat/rail/noisy/line) |
-| `summarize_last` | a one-line status string |
+The model calls tools:
+- `get_neural_state()` → focus/relax/engagement + dominant band
+- `get_channel_quality()` → per-channel verdicts (good/flat/rail/noisy/line)
+- `get_recent_events()` → timestamped event log
+- `get_band_powers(per_channel=True)` → spatial detail
 
-A typical session — the copilot keeps context across turns, so follow-ups just
-work:
-
-```
-you > how's my signal looking?
-  (consulted: get_channel_quality)
-copilot > Clean. All four channels read "good", line-noise is low and overall
-quality is 1.00 — nothing flat or railing, so the indices below are
-trustworthy.
-
-you > ok, am I focused?
-  (consulted: get_neural_state)
-copilot > Focus is low for you right now (0.34) and alpha is the dominant band,
-which usually means a relaxed, eyes-resting state rather than active
-concentration.
-
-you > did anything change in the last minute?
-  (consulted: get_recent_events)
-copilot > One shift: relaxation rose to 0.74 about 40 s ago. No quality drops
-since then, so that looks like a real change rather than an artifact.
-```
-
-Right after start-up you get the honest-metrics guardrails instead of a number:
-
-```
-you > am I focused?
-  (consulted: get_neural_state)
-copilot > The stream is still warming up, so I can't give you a meaningful
-reading yet — the indices calibrate against your own range and currently sit at
-a neutral 0.50. Give it a few more seconds.
-```
-
-The system prompt holds the copilot to that honest-metrics line: indices are
-within-session relative, warm-up and poor signal quality are surfaced before
-any conclusion, and every claim about the brain must come from a tool call.
-The provider layer is plain HTTP — **no vendor SDK is imported** — so swapping
-backends is just config.
-
-## Act on the device (Phase 3)
-
-Reading the brain is free; *acting* on the device is not. The agent talks to
-PiEEG-server's WebSocket control plane (`ws://localhost:1616`) through a gate
-that enforces three independent checks and audits every attempt:
-
-- **allowlist** — only explicitly enabled actions can run (default: none),
-- **dry-run** — an allowed action is *previewed* (what would be sent), never
-  executed — the safe default for the copilot,
-- **cooldown** — a minimum interval between real executions of an action.
-
-### Direct control (explicit, human-invoked)
+### 4. Interactive Chat
 
 ```bash
-pieeg-server --mock --lsl                       # Terminal 1
+pieeg-agent chat
+```
 
-pieeg-agent control status                       # read the server snapshot
+Keeps conversation context:
+```
+you > how's my signal?
+  (calls: get_channel_quality)
+copilot > All 8 channels read "good", quality score 0.98 — trustworthy signal.
+
+you > am I focused or relaxed?
+  (calls: get_neural_state)
+copilot > Relaxed. Alpha is dominant (0.87) and focus is low (0.31) — typical 
+          eyes-closed resting state.
+
+you > what changed in the last minute?
+  (calls: get_recent_events)
+copilot > Relaxation spiked to 0.81 about 35 seconds ago, no quality issues since.
+```
+
+Press Ctrl+D to exit.
+
+### 5. Device Control (Gated)
+
+**Direct control** (you invoke explicitly):
+```bash
+pieeg-agent control status                          # read device state
 pieeg-agent control set-filter --lowcut 1 --highcut 40
-pieeg-agent control set-filter --off --dry-run   # preview without sending
-pieeg-agent control record start                 # … and: record stop
-pieeg-agent control reg-preset test_signal       # ADS1299 square-wave self-test
+pieeg-agent control record start
 pieeg-agent control osc start --host 127.0.0.1 --port 9000
-pieeg-agent control webhooks                      # list configured rules
-pieeg-agent control audit                         # read the recent audit log
+pieeg-agent control audit                            # see action log
 ```
 
-`control` runs for real by default (you asked); add `--dry-run` to preview.
-Each call prints the outcome — `[OK]`, `[DRY-RUN]`, `[DENIED]` or `[ERROR]`.
+**Copilot with hands** (opt-in, dry-run by default):
+```bash
+pieeg-agent chat --allow-actions                    # preview only
+pieeg-agent chat --allow-actions --execute          # actually act
+```
 
-### Copilot with hands (opt-in, gated)
+Every action passes through a gate:
+- **Allowlist** — only permitted actions can run
+- **Dry-run** — previewed, not executed (default for copilot)
+- **Cooldown** — minimum interval between executions
+- **Audit** — logged with timestamp, user, outcome
+
+---
+
+## 🔬 Scientific Approach: Honest Metrics
+
+This agent is designed for **neurofeedback research and UX prototyping**, not clinical use. Metrics are presented with scientific honesty:
+
+### Within-Session Relative Indices
+
+`focus`, `relax`, `engagement` are **normalised to the session's own range** (rolling 10-minute window). They say "high *for you, right now*" — not absolute or clinical values.
+
+- **Warm-up required**: Indices read 0.50 until the signal shows variance. A `~` prefix marks this period, and the copilot says "still warming up" instead of inventing numbers.
+- **Quality gates**: Poor electrode contact or artifact is flagged *before* reporting state. Bad signal → meaningless indices.
+
+### Event Detection with Hysteresis
+
+Transitions require:
+- **Threshold crossing** (default: 0.70 for high, 0.30 for low)
+- **Minimum dwell time** (default: 2 s — no flicker on brief excursions)
+- **Quality floor** (default: 0.50 — don't emit events during artifact)
+
+This prevents spurious events from noise or motion.
+
+### Why This Matters for Developers
+
+- **Reproducible**: Seed the mock server, get deterministic signal
+- **Testable**: Event logs have timestamps, quality verdicts are per-channel
+- **Debuggable**: Every LLM claim is traceable to a tool call with exact state
+- **Honest**: Users learn when the system *doesn't know* (warm-up, poor signal) instead of hallucinating confidence
+
+---
+
+## ⚙️ Configuration
+
+All tunables have env-var overrides and CLI flags:
+
+| Setting | Env Var | Default | Notes |
+|---------|---------|---------|-------|
+| LLM provider | `PIEEG_LLM_PROVIDER` | `anthropic` | `openai`, `groq`, `ollama`, etc. |
+| Model name | `PIEEG_LLM_MODEL` | provider default | e.g. `claude-3-5-sonnet-20241022` |
+| API key | `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` | — | Not needed for local (Ollama) |
+| LSL stream name | `PIEEG_LSL_NAME` | `PiEEG` | Auto-discover if not set |
+| Ring buffer (s) | `PIEEG_RING_SECONDS` | `60.0` | How much history to keep |
+| Feature rate (Hz) | — | `8.0` | FFT update frequency |
+| State rate (Hz) | — | `1.0` | Index smoothing output |
+| Mains freq (Hz) | — | `50.0` | Line-noise check (use `60` for US) |
+
+Example:
+```bash
+export PIEEG_LLM_PROVIDER=ollama
+export PIEEG_LLM_MODEL=llama3.2
+pieeg-agent chat                # uses local Llama, no key needed
+```
+
+---
+
+## 🧪 Development & Testing
 
 ```bash
-pieeg-agent chat --allow-actions                 # dry-run preview by default
-pieeg-agent chat --allow-actions --execute       # actually perform actions
+# Install with dev dependencies
+pip install -e ".[dev,server]"
+
+# Run tests
+pytest tests/
+
+# Test with mock signal (deterministic)
+pieeg-server --mock --lsl
+pieeg-agent monitor --seconds 10
+
+# Test provider without EEG stream
+python -m pieeg_agent.llm.factory --provider anthropic
 ```
 
-`--allow-actions` adds a curated, safe set of control tools to the copilot
-(filter, recording, OSC, register *presets* — raw register writes are never
-exposed). Without `--execute` the copilot can only *preview* actions, so you
-can watch what it would do before letting it do anything. A session that is
-given hands uses a stricter system prompt: act only when asked, read status
-before changing it, never retry in a loop, and always report the gate's real
-outcome (executed vs previewed vs denied).
+**Key modules:**
+- `ingest/` — LSL intake, ring buffer (no LLM dependency)
+- `perceive/` — Feature extraction, state estimation, events (pure DSP)
+- `llm/` — Provider abstraction, HTTP-only (no vendor SDKs)
+- `agent/` — Copilot, tool dispatch, conversation loop
+- `server/` — WebSocket client, action gate, audit log
 
-| Tool | Effect | Gated? |
+**Tests validate:**
+- Ring buffer handles overwrite correctly
+- Feature extraction matches known FFT results
+- Event detector hysteresis prevents flicker
+- Provider wire format (request/response, tool calling)
+- Gate enforcement (allowlist, cooldown, dry-run)
+
+---
+
+## 🎯 Roadmap
+
+- [x] **Phase 0**: High-rate LSL intake (chunked pulls, ring buffer)
+- [x] **Phase 1**: Perception cascade (features → state → events)
+- [x] **Phase 2**: LLM copilot (read-only tools, provider-agnostic)
+- [x] **Phase 3**: Gated device actions (allowlist, dry-run, audit)
+- [ ] **Phase 4**: Multi-modal (EEG + EOG + EMG streams, fusion tools)
+- [ ] **Phase 5**: Session memory (vector store for long-term patterns)
+
+---
+
+## 📚 Learn More
+
+- **[PiEEG Hardware](https://pieeg.com)** — Open-source EEG shield for Raspberry Pi
+- **[Lab Streaming Layer](https://labstreaminglayer.org)** — Time-sync for multi-modal bio signals
+- **[Anthropic Tools](https://docs.anthropic.com/en/docs/build-with-claude/tool-use)** — How the copilot calls functions
+- **[Honest Neurofeedback Metrics](https://www.frontiersin.org/articles/10.3389/fnhum.2016.00301/full)** — Why we surface warm-up and quality
+
+---
+
+## 📄 License
+
+MIT — see [LICENSE](LICENSE) for details.
+
+---
+
+## 🙏 Contributing
+
+Issues and PRs welcome. Please include:
+- **For bugs**: `pieeg-agent config` output, LSL stream info, error trace
+- **For features**: Use case, proposed CLI/API, why current tools don't suffice
+- **For metrics**: Citations for thresholds, validation on public datasets
 |------|--------|--------|
 | `server_status` | read sample rate, channels, filter, recording, LSL state | read-only |
 | `list_webhooks` | list configured webhook rules | read-only |
