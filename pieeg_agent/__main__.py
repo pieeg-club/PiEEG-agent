@@ -23,8 +23,10 @@ from __future__ import annotations
 
 import argparse
 import logging
+import os
 import sys
 import time
+from pathlib import Path
 
 from . import __version__
 from .config import PROVIDERS, AgentConfig
@@ -163,6 +165,15 @@ def _build_parser() -> argparse.ArgumentParser:
         "--token", default=None,
         help="Control-plane auth token, if the server requires one.",
     )
+    common.add_argument(
+        "--audit-log", default=None,
+        help="Where to record gated actions as JSONL "
+        "(default: ~/.pieeg-agent/audit.jsonl / $PIEEG_AUDIT_LOG).",
+    )
+    common.add_argument(
+        "--no-audit-log", action="store_true",
+        help="Do not persist gated actions to disk (in-memory audit only).",
+    )
 
     p_ask = sub.add_parser(
         "ask", parents=[common],
@@ -191,10 +202,19 @@ def _build_parser() -> argparse.ArgumentParser:
         "--dry-run", action="store_true",
         help="Preview the action (what would be sent) without performing it.",
     )
+    ctl_common.add_argument(
+        "--audit-log", default=None,
+        help="Where to record gated actions as JSONL "
+        "(default: ~/.pieeg-agent/audit.jsonl / $PIEEG_AUDIT_LOG).",
+    )
+    ctl_common.add_argument(
+        "--no-audit-log", action="store_true",
+        help="Do not persist gated actions to disk (in-memory audit only).",
+    )
 
     p_control = sub.add_parser(
         "control", help="Send a gated action to PiEEG-server (filter, recording, "
-        "OSC, register presets, webhooks).",
+        "OSC, register presets, webhooks) or read the audit log.",
     )
     csub = p_control.add_subparsers(dest="control_cmd")
 
@@ -248,6 +268,15 @@ def _build_parser() -> argparse.ArgumentParser:
     csub.add_parser(
         "webhooks", parents=[ctl_common],
         help="List the server's webhook rules (read-only).",
+    )
+
+    c_audit = csub.add_parser(
+        "audit", parents=[ctl_common],
+        help="Show recent gated-action attempts from the audit log (local read).",
+    )
+    c_audit.add_argument(
+        "--limit", type=int, default=20,
+        help="Maximum entries to show (default 20).",
     )
 
     sub.add_parser("config", help="Print the resolved configuration.")
@@ -624,7 +653,6 @@ def _build_actuator(args, cfg, safe_actions):
     from .server import (
         ActionGate,
         ActionPolicy,
-        AuditLog,
         ServerActions,
         ServerControlClient,
         ServerControlError,
@@ -645,18 +673,56 @@ def _build_actuator(args, cfg, safe_actions):
         return None, None
 
     policy = ActionPolicy.allow(*safe_actions, dry_run=not execute, cooldown_s=3.0)
-    gate = ActionGate(policy, AuditLog())
+    gate = ActionGate(policy, _audit_log(args))
     actions = ServerActions(client, gate)
     verb = "EXECUTE" if execute else "dry-run preview"
     mock = " (mock)" if welcome.get("mock") else ""
     print(f"Control plane connected at {ws_url}{mock}  \u2014  actions: {verb}")
+    if gate.audit.path:
+        print(f"Audit log: {gate.audit.path}")
     return ActuatorTools(actions), client
 
 
 def _control_token(args):
-    import os
-
     return args.token or os.environ.get("PIEEG_WS_TOKEN")
+
+
+def _audit_log_path(args) -> str | None:
+    """Resolve the audit-log JSONL path, or ``None`` if persistence is off.
+
+    Order: ``--no-audit-log`` wins; else ``--audit-log`` flag, then
+    ``$PIEEG_AUDIT_LOG``, then a default under the user's home.
+    """
+    if getattr(args, "no_audit_log", False):
+        return None
+    return (
+        getattr(args, "audit_log", None)
+        or os.environ.get("PIEEG_AUDIT_LOG")
+        or str(Path.home() / ".pieeg-agent" / "audit.jsonl")
+    )
+
+
+def _audit_log(args):
+    """Build an :class:`AuditLog`, persisting to JSONL unless disabled.
+
+    Creates the parent directory if needed; falls back to an in-memory log if
+    the path can't be prepared, so a bad path never blocks an action.
+    """
+    from .server import AuditLog
+
+    path = _audit_log_path(args)
+    if path is None:
+        return AuditLog()
+    try:
+        Path(path).parent.mkdir(parents=True, exist_ok=True)
+    except OSError as exc:
+        print(
+            f"Warning: cannot prepare audit log {path}: {exc} "
+            "(continuing without persistence).",
+            file=sys.stderr,
+        )
+        return AuditLog()
+    return AuditLog(path=path)
 
 
 def _wait_for_state(cascade, timeout: float) -> None:
@@ -740,10 +806,14 @@ def cmd_control(args) -> int:
     if not getattr(args, "control_cmd", None):
         print(
             "Specify a control subcommand: status, set-filter, record, osc, "
-            "reg-preset, webhooks.",
+            "reg-preset, webhooks, audit.",
             file=sys.stderr,
         )
         return 2
+
+    # `audit` is a purely local read of the JSONL log — no server connection.
+    if args.control_cmd == "audit":
+        return _cmd_control_audit(args)
 
     action_name, invoke = _resolve_control(args)
     if invoke is None:
@@ -770,14 +840,17 @@ def cmd_control(args) -> int:
     )
 
     # Explicit human commands run for real by default; --dry-run previews. A
-    # read (action_name is None) needs no gate at all.
+    # read (action_name is None) needs no gate, and isn't audited; a real
+    # action is allowlisted to just itself and recorded to the audit log.
     if action_name is None:
         policy = ActionPolicy()
+        audit = AuditLog()
     else:
         policy = ActionPolicy.allow(
             action_name, dry_run=getattr(args, "dry_run", False), cooldown_s=0.0
         )
-    actions = ServerActions(client, ActionGate(policy, AuditLog()))
+        audit = _audit_log(args)
+    actions = ServerActions(client, ActionGate(policy, audit))
 
     try:
         result = invoke(actions)
@@ -851,6 +924,63 @@ def _print_control_result(action_name, result) -> None:
         print(f"  would send: {json.dumps(result.get('would_send', {}))}")
     elif outcome == "executed":
         print(f"  result: {json.dumps(result.get('result', {}))}")
+
+
+def _cmd_control_audit(args) -> int:
+    """Print the most recent gated-action attempts from the audit log."""
+    import json
+
+    path = _audit_log_path(args)
+    if path is None:
+        print("Audit logging is disabled (--no-audit-log).", file=sys.stderr)
+        return 1
+
+    p = Path(path)
+    if not p.exists():
+        print(f"No audit log yet at {path}.")
+        print(
+            "Actions you run (control … or chat --allow-actions --execute) "
+            "will be recorded there."
+        )
+        return 0
+
+    try:
+        raw = p.read_text(encoding="utf-8").splitlines()
+    except OSError as exc:
+        print(f"Could not read audit log {path}: {exc}", file=sys.stderr)
+        return 1
+
+    entries = []
+    for line in raw:
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            entries.append(json.loads(line))
+        except ValueError:  # skip a torn/partial line
+            continue
+
+    if not entries:
+        print(f"Audit log {path} is empty.")
+        return 0
+
+    limit = getattr(args, "limit", 20) or 20
+    shown = entries[-limit:]
+    noun = "entry" if len(entries) == 1 else "entries"
+    print(f"Audit log: {path}  ({len(entries)} {noun}, showing {len(shown)})\n")
+    for e in shown:
+        ts = e.get("timestamp")
+        when = (
+            time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(ts))
+            if isinstance(ts, (int, float)) else "?"
+        )
+        marker = _CONTROL_MARKERS.get(e.get("outcome", ""), str(e.get("outcome")))
+        line = f"  {when}  [{marker:>7}] {e.get('action', '?')}"
+        reason = e.get("reason", "")
+        if reason:
+            line += f"  -  {reason}"
+        print(line)
+    return 0
 
 
 def _print_stream_menu(ranked) -> None:

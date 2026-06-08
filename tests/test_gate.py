@@ -193,6 +193,24 @@ def test_audit_log_writes_jsonl_file(tmp_path):
     assert json.loads(lines[1])["outcome"] == "denied"
 
 
+def test_audit_log_path_property():
+    assert AuditLog().path is None
+    assert AuditLog(path="/tmp/a.jsonl").path == "/tmp/a.jsonl"
+
+
+def test_gate_run_through_a_persisting_audit_log(tmp_path):
+    # An action driven through the gate is appended to the JSONL file.
+    path = tmp_path / "gate-audit.jsonl"
+    gate = ActionGate(
+        ActionPolicy.allow("set_filter", dry_run=False), AuditLog(path=str(path))
+    )
+    gate.run("set_filter", {"lowcut": 1, "highcut": 40}, lambda: {"ok": True})
+    gate.run("denied_action", {}, lambda: {})  # not allowed -> still recorded
+    records = [json.loads(ln) for ln in path.read_text("utf-8").splitlines() if ln]
+    assert [r["action"] for r in records] == ["set_filter", "denied_action"]
+    assert [r["outcome"] for r in records] == ["executed", "denied"]
+
+
 def test_audit_recent_limit():
     audit = AuditLog()
     for i in range(10):

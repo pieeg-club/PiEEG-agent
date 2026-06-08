@@ -176,6 +176,7 @@ pieeg-agent control record start                 # … and: record stop
 pieeg-agent control reg-preset test_signal       # ADS1299 square-wave self-test
 pieeg-agent control osc start --host 127.0.0.1 --port 9000
 pieeg-agent control webhooks                      # list configured rules
+pieeg-agent control audit                         # read the recent audit log
 ```
 
 `control` runs for real by default (you asked); add `--dry-run` to preview.
@@ -238,7 +239,23 @@ seconds to stop repeat actions firing back-to-back. Ask me again shortly.
 ```
 
 Every attempt — previewed, executed or denied — is written to an audit log, so
-there's always a record of what the agent did or tried to do.
+there's always a record of what the agent did or tried to do. By default it
+persists to `~/.pieeg-agent/audit.jsonl` (override with `--audit-log PATH` or
+`$PIEEG_AUDIT_LOG`, or turn it off with `--no-audit-log`). Read it back with:
+
+```bash
+pieeg-agent control audit            # last 20 attempts (newest last)
+pieeg-agent control audit --limit 5  # just the last 5
+```
+
+```
+Audit log: ~/.pieeg-agent/audit.jsonl  (2 entries, showing 2)
+
+  2026-06-08 11:57:47  [     OK] set_filter
+  2026-06-08 11:57:49  [DRY-RUN] reg_preset  -  dry-run: not sent to the device
+```
+
+`control audit` is a local file read — it never touches the server.
 
 Install the control-plane client with `pip install -e ".[server]"` (it pulls
 in `websockets`). The client is synchronous — a background reader thread that
@@ -260,6 +277,7 @@ Environment variables (all optional):
 | `ANTHROPIC_API_KEY` | — | key for the default provider |
 | `PIEEG_WS_URL` | `ws://localhost:1616` | PiEEG-server control plane |
 | `PIEEG_WS_TOKEN` | — | control-plane auth token, if the server requires one |
+| `PIEEG_AUDIT_LOG` | `~/.pieeg-agent/audit.jsonl` | where gated actions are recorded |
 
 ## Layout
 

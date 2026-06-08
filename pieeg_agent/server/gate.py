@@ -83,6 +83,11 @@ class AuditLog:
         self._path = path
         self._lock = threading.Lock()
 
+    @property
+    def path(self) -> str | None:
+        """The JSONL file this log persists to, or ``None`` if in memory only."""
+        return self._path
+
     def record(self, entry: AuditEntry) -> None:
         with self._lock:
             self._entries.append(entry)
