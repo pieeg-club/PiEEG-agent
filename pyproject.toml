@@ -1,0 +1,60 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "pieeg-agent"
+version = "0.1.0"
+description = "Provider-agnostic LLM agent that perceives live PiEEG brain activity over Lab Streaming Layer and acts through PiEEG-server."
+readme = "README.md"
+requires-python = ">=3.10"
+license = {text = "MIT"}
+authors = [
+    {name = "PiEEG Community"},
+]
+keywords = ["eeg", "bci", "pieeg", "lsl", "agent", "llm", "anthropic",
+            "neurofeedback", "brain-computer-interface"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Science/Research",
+    "Topic :: Scientific/Engineering :: Medical Science Apps.",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "License :: OSI Approved :: MIT License",
+    "Environment :: Console",
+]
+dependencies = [
+    "numpy>=1.24",
+    "pylsl>=1.16",
+]
+
+[project.optional-dependencies]
+# Native Anthropic Messages API (default provider).
+anthropic = [
+    "anthropic>=0.40",
+]
+# OpenAI-compatible providers (OpenAI, Groq, Together, Ollama, LM Studio, …).
+openai = [
+    "openai>=1.30",
+]
+# PiEEG-server control-plane client (WebSocket :1616) — used from Phase 3.
+server = [
+    "websockets>=12.0",
+]
+dev = [
+    "pytest>=7.0",
+    "pytest-asyncio>=0.21",
+]
+
+[project.scripts]
+pieeg-agent = "pieeg_agent.__main__:main"
+
+[project.urls]
+Homepage = "https://github.com/pieeg-club/PiEEG-agent"
+Repository = "https://github.com/pieeg-club/PiEEG-agent"
+Issues = "https://github.com/pieeg-club/PiEEG-agent/issues"
+
+[tool.setuptools.packages.find]
+include = ["pieeg_agent*"]
