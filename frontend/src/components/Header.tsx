@@ -2,7 +2,15 @@ import type { Info } from "../types";
 
 // Top bar: brand, the live session facts (stream / channels / rate / model)
 // and a connection dot reflecting the /ws/live socket.
-export function Header({ info, connected }: { info: Info | null; connected: boolean }) {
+export function Header({
+  info,
+  connected,
+  onSettings,
+}: {
+  info: Info | null;
+  connected: boolean;
+  onSettings: () => void;
+}) {
   return (
     <header className="app-header">
       <div className="brand">
@@ -15,10 +23,11 @@ export function Header({ info, connected }: { info: Info | null; connected: bool
         {info?.channels != null && <span className="chip">{info.channels} ch</span>}
         {info?.rate != null && <span className="chip">{info.rate} Hz</span>}
         {info?.provider && (
-          <span className="chip chip-accent">
+          <button className="chip chip-accent chip-clickable" onClick={onSettings}>
             {info.provider}
             {info.model ? ` · ${info.model}` : ""}
-          </span>
+            <span className="chip-icon">⚙</span>
+          </button>
         )}
         {info?.control && (
           <span className="chip chip-warn" title="The copilot has gated control tools">

@@ -23,10 +23,15 @@ function Meter({ label, value, tone }: { label: string; value?: number; tone?: s
 export function StateCard({ state }: { state?: NeuralState }) {
   const nodata = !state || state.status === "no_data";
   return (
-    <section className="card">
+    <section className="card state-card">
       <div className="card-title">
-        Live state
+        Live Neural State
         {state?.warming_up && <span className="tag">warming up</span>}
+        {state?.signal_quality != null && (
+          <span className="tag" style={{ marginLeft: "auto" }}>
+            {pct(state.signal_quality)} quality
+          </span>
+        )}
       </div>
       {nodata ? (
         <div className="muted">Waiting for the first analysis window…</div>
@@ -36,15 +41,19 @@ export function StateCard({ state }: { state?: NeuralState }) {
           <Meter label="Relax" value={state.relax} tone="t-relax" />
           <Meter label="Engagement" value={state.engagement} tone="t-engage" />
           <div className="state-footer">
-            <span>
-              dominant <b>{cap(state.dominant_band)}</b>
+            <span className="state-stat">
+              <span className="stat-label">Dominant Band</span>
+              <span className="stat-value">{cap(state.dominant_band)}</span>
             </span>
-            <span>
-              signal <b>{pct(state.signal_quality)}</b>
-            </span>
+            {state.n_channels != null && (
+              <span className="state-stat">
+                <span className="stat-label">Channels</span>
+                <span className="stat-value">{state.n_channels}</span>
+              </span>
+            )}
           </div>
           {state.bad_channels && state.bad_channels.length > 0 && (
-            <div className="warn-line">check: {state.bad_channels.join(", ")}</div>
+            <div className="warn-line">⚠ Check: {state.bad_channels.join(", ")}</div>
           )}
         </>
       )}

@@ -4,6 +4,7 @@ import { Chat } from "./components/Chat";
 import { ArtifactFeed, BandBars, QualityGrid, StateCard } from "./components/BrainCards";
 import { ConnectivityCard } from "./components/ConnectivityCard";
 import { Header } from "./components/Header";
+import { LLMSettings } from "./components/LLMSettings";
 import { PatternModal } from "./components/PatternModal";
 import { PatternTicker } from "./components/PatternTicker";
 import { TrainingOverlay } from "./components/TrainingOverlay";
@@ -19,6 +20,7 @@ export default function App() {
 
   const [info, setInfo] = useState<Info | null>(null);
   const [training, setTraining] = useState(false);
+  const [showSettings, setShowSettings] = useState(false);
   const [explain, setExplain] = useState<{ name: string; data: PatternExplain | null } | null>(null);
 
   useEffect(() => {
@@ -42,7 +44,7 @@ export default function App() {
 
   return (
     <div className="app">
-      <Header info={info} connected={connected} />
+      <Header info={info} connected={connected} onSettings={() => setShowSettings(true)} />
       <main className="layout">
         <Chat
           messages={chat.messages}
@@ -70,6 +72,7 @@ export default function App() {
       {explain && (
         <PatternModal name={explain.name} data={explain.data} onClose={() => setExplain(null)} />
       )}
+      {showSettings && <LLMSettings info={info} onClose={() => setShowSettings(false)} />}
     </div>
   );
 }

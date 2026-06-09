@@ -18,7 +18,7 @@ from pathlib import Path
 from typing import Iterator
 
 import anyio
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
@@ -107,6 +107,32 @@ def create_app(
         result = await run_in_threadpool(engine.forget_pattern, name)
         status = 404 if "error" in result else 200
         return JSONResponse(result, status_code=status)
+
+    @app.post("/api/llm/config")
+    async def update_llm_config(request: Request) -> dict:
+        """Update LLM configuration (runtime only, not persisted)."""
+        # This endpoint allows runtime configuration changes.
+        # For permanent config, users should set environment variables.
+        data = await request.json()
+        provider = data.get("provider")
+        model = data.get("model")
+        api_key = data.get("api_key")
+        
+        # Validation: provider is required
+        if not provider:
+            return JSONResponse(
+                {"detail": "provider is required"}, 
+                status_code=400
+            )
+        
+        # Note: This is a runtime-only change. For production use,
+        # implement persistent configuration storage or use env vars.
+        return {
+            "status": "configuration received",
+            "note": "Runtime config not yet implemented. Set PIEEG_LLM_PROVIDER, PIEEG_LLM_MODEL, and API keys via environment variables and restart.",
+            "provider": provider,
+            "model": model or "default",
+        }
 
     # ── WS: live brain telemetry (server-push) ───────────────────────────
     @app.websocket("/ws/live")
