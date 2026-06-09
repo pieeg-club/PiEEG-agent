@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import type { ChatMessage, Part, ToolPart } from "../hooks/useChatSocket";
+import { toast } from "./Toast";
 
 const SUGGESTIONS = [
   "What is my brain doing right now?",
@@ -41,6 +42,15 @@ function renderPart(p: Part, i: number) {
 
 function Bubble({ m }: { m: ChatMessage }) {
   const empty = m.parts.length === 0;
+  
+  const copyMessage = () => {
+    const textParts = m.parts.filter((p) => p.kind === "text").map((p) => (p as { text: string }).text);
+    const text = textParts.join("\n");
+    navigator.clipboard.writeText(text).then(() => {
+      toast.success("Message copied");
+    });
+  };
+
   return (
     <div className={"msg " + m.role}>
       <div className="avatar">{m.role === "user" ? "You" : "◉"}</div>
@@ -59,6 +69,11 @@ function Bubble({ m }: { m: ChatMessage }) {
             {m.usage.input_tokens}→{m.usage.output_tokens} tok
             {m.iterations ? ` · ${m.iterations} step${m.iterations > 1 ? "s" : ""}` : ""}
           </div>
+        )}
+        {m.role === "assistant" && m.done && !empty && (
+          <button className="copy-btn" onClick={copyMessage} title="Copy message">
+            📋
+          </button>
         )}
       </div>
     </div>
@@ -138,7 +153,7 @@ export function Chat({
       </div>
 
       <div className="chat-bar">
-        <button className="link" onClick={onReset}>
+        <button className="link" onClick={() => { onReset(); toast.info("Chat reset"); }}>
           Reset conversation
         </button>
         <span className="conn">

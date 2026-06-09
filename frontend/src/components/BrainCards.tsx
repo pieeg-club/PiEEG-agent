@@ -1,6 +1,10 @@
 import type { Artifacts, Bands, NeuralState, Quality } from "../types";
 import { ago, cap, clamp01, orderBands, pct } from "../util";
 
+function Skeleton({ width = "100%", height = "10px" }: { width?: string; height?: string }) {
+  return <div className="skeleton" style={{ width, height }} />;
+}
+
 function Meter({ label, value, tone }: { label: string; value?: number; tone?: string }) {
   return (
     <div className="meter">
@@ -34,7 +38,15 @@ export function StateCard({ state }: { state?: NeuralState }) {
         )}
       </div>
       {nodata ? (
-        <div className="muted">Waiting for the first analysis window…</div>
+        <div className="skeleton-container">
+          <Skeleton height="36px" />
+          <Skeleton height="36px" />
+          <Skeleton height="36px" />
+          <div style={{ display: "flex", gap: "12px", marginTop: "12px" }}>
+            <Skeleton width="50%" height="24px" />
+            <Skeleton width="50%" height="24px" />
+          </div>
+        </div>
       ) : (
         <>
           <Meter label="Focus" value={state.focus} tone="t-focus" />
@@ -69,7 +81,11 @@ export function BandBars({ bands }: { bands?: Bands }) {
     <section className="card">
       <div className="card-title">Frequency bands</div>
       {nodata ? (
-        <div className="muted">No spectrum yet…</div>
+        <div className="skeleton-container">
+          {[...Array(5)].map((_, i) => (
+            <Skeleton key={i} height="24px" />
+          ))}
+        </div>
       ) : (
         <div className="bands">
           {orderBands(rel!).map(([name, val]) => (
@@ -108,7 +124,13 @@ export function QualityGrid({ quality }: { quality?: Quality }) {
         {quality?.overall != null && <span className="tag">{pct(quality.overall)}</span>}
       </div>
       {!chans || !chans.length ? (
-        <div className="muted">No channels yet…</div>
+        <div className="skeleton-container">
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(70px, 1fr))", gap: "8px" }}>
+            {[...Array(8)].map((_, i) => (
+              <Skeleton key={i} height="36px" />
+            ))}
+          </div>
+        </div>
       ) : (
         <div className="chan-grid">
           {chans.map((c) => (

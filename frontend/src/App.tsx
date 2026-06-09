@@ -7,6 +7,7 @@ import { Header } from "./components/Header";
 import { LLMSettings } from "./components/LLMSettings";
 import { PatternModal } from "./components/PatternModal";
 import { PatternTicker } from "./components/PatternTicker";
+import { toast, ToastContainer } from "./components/Toast";
 import { TrainingOverlay } from "./components/TrainingOverlay";
 import { useChatSocket } from "./hooks/useChatSocket";
 import { useLiveSocket } from "./hooks/useLiveSocket";
@@ -38,8 +39,13 @@ export default function App() {
   };
 
   const forget = async (name: string) => {
-    await api.forget(name);
-    // The live /ws/live snapshot reflects the removal on its next push.
+    try {
+      await api.forget(name);
+      toast.success(`Pattern "${name}" deleted`);
+      // The live /ws/live snapshot reflects the removal on its next push.
+    } catch (err) {
+      toast.error("Failed to delete pattern");
+    }
   };
 
   return (
@@ -73,6 +79,7 @@ export default function App() {
         <PatternModal name={explain.name} data={explain.data} onClose={() => setExplain(null)} />
       )}
       {showSettings && <LLMSettings info={info} onClose={() => setShowSettings(false)} />}
+      <ToastContainer />
     </div>
   );
 }

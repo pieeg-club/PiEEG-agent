@@ -1,3 +1,4 @@
+import { useEffect } from "react";
 import type { ChannelImportance, PatternExplain } from "../types";
 import { clamp01, pct, scoreTone } from "../util";
 
@@ -17,6 +18,13 @@ export function PatternModal({
   data: PatternExplain | null;
   onClose: () => void;
 }) {
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [onClose]);
   const cv = data?.cross_validation as Record<string, unknown> | undefined;
   const bacc = num(cv?.balanced_accuracy);
   const folds = num(cv?.n_folds);

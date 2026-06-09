@@ -1,6 +1,7 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { TrainResult } from "../types";
 import { pct, scoreTone } from "../util";
+import { toast } from "./Toast";
 
 const PREP_S = 2; // "get ready" beat before each recorded segment
 
@@ -108,6 +109,14 @@ export function TrainingOverlay({
     const res = await train.finish(0.6);
     setResult(res);
     setStep("result");
+    if (res.cross_validation?.balanced_accuracy) {
+      const acc = res.cross_validation.balanced_accuracy;
+      if (acc >= 0.7) {
+        toast.success(`Pattern trained! ${pct(acc)} accuracy`);
+      } else {
+        toast.info(`Pattern trained with ${pct(acc)} accuracy — add more reps to improve`);
+      }
+    }
   };
 
   const begin = async () => {
@@ -132,6 +141,16 @@ export function TrainingOverlay({
       ? "REST — relax and hold still"
       : "ACTIVE — do the pattern now";
   };
+
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === "Escape" && (step === "setup" || step === "result")) {
+        onClose();
+      }
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [step, onClose]);
 
   return (
     <div className="overlay">

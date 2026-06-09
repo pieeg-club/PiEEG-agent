@@ -27,7 +27,14 @@ export interface ChatMessage {
 // and serialises sends behind a `busy` flag (the backend handles one turn at a
 // time). Tool calls render inline as chips, ChatGPT/Gemini style.
 export function useChatSocket() {
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [messages, setMessages] = useState<ChatMessage[]>(() => {
+    try {
+      const saved = sessionStorage.getItem("pieeg-chat-history");
+      return saved ? JSON.parse(saved) : [];
+    } catch {
+      return [];
+    }
+  });
   const [connected, setConnected] = useState(false);
   const [busy, setBusyState] = useState(false);
 
@@ -39,6 +46,15 @@ export function useChatSocket() {
     busyRef.current = v;
     setBusyState(v);
   };
+
+  // Persist chat history to sessionStorage
+  useEffect(() => {
+    try {
+      sessionStorage.setItem("pieeg-chat-history", JSON.stringify(messages));
+    } catch {
+      // Ignore quota errors
+    }
+  }, [messages]);
 
   // Apply a mutation to the current (last) assistant message.
   const mutateLast = useCallback(
@@ -152,6 +168,11 @@ export function useChatSocket() {
     sockRef.current?.send({ reset: true });
     setMessages([]);
     setBusy(false);
+    try {
+      sessionStorage.removeItem("pieeg-chat-history");
+    } catch {
+      // Ignore
+    }
   }, []);
 
   return { messages, connected, busy, send, reset };
