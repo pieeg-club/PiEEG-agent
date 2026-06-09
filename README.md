@@ -1,44 +1,32 @@
 # PiEEG-agent
 
-**Talk to your brain.** An LLM copilot that perceives live EEG from [PiEEG](https://pieeg.com) hardware, reduces high-frequency neural signals into human-readable state, and lets you ask questions in natural language about your focus, relaxation, and signal quality.
+**Natural language EEG lab notebook.** Train pattern classifiers, analyze connectivity, compare sessions — all by talking to an AI copilot that reads your live brain signals.
 
-```bash
-pieeg-agent chat
-you > am I focused right now?
-copilot > Focus is high for you right now (0.78) with beta dominance — looks like active concentration.
-```
+Reads from any [Lab Streaming Layer](https://labstreaminglayer.org) (LSL) EEG source. Optional control plane for [PiEEG](https://pieeg.com) hardware. Works with synthetic signal for development.
 
 ---
 
-## 🚀 Quick Start (2 minutes)
-
-**No EEG hardware needed for demo** — runs with synthetic signal.
+## ⚡ 60-Second Start
 
 ```bash
-# 1. Install
-pip install -e .
-
-# 2. Start synthetic EEG stream (terminal 1)
+# Terminal 1: Start mock EEG stream
 pieeg-server --mock --lsl
 
-# 3. Watch live brain state (terminal 2)
-pieeg-agent monitor --seconds 20
-
-# 4. Talk to your brain (needs API key)
-export ANTHROPIC_API_KEY=sk-ant-...
-pieeg-agent ask "how's my signal quality?"
+# Terminal 2: Launch web UI
+pip install -e .
+export ANTHROPIC_API_KEY=sk-ant-...  # or use ollama/openai/groq
+pieeg-agent web
 ```
 
-You'll see:
-- **`monitor`** — Live focus/relax indices, dominant frequency band, signal quality
-- **`ask`** — One-shot questions answered by Claude/GPT/Llama using perception tools
-- **`chat`** — Multi-turn conversation with memory of previous context
+Open http://localhost:8765 → Chat with your brain data in real-time.
+
+**No hardware?** Mock server generates realistic multi-channel EEG over LSL.
 
 ---
 
-## 📊 What Problem Does This Solve?
+## 🧪 Lab Features — What You Can Do
 
-**The challenge**: LLMs reason in natural language at ~1 Hz. EEG arrives at 250–500 Hz × 8–32 channels = 2,000–16,000 samples/second. You can't dump raw voltages into a prompt.
+**The challenge**: LLMs reason in natural language at ~1 Hz. EEG arrives at 250–500 Hz × multiple channels = thousands of samples/second. You can't dump raw voltages into a prompt.
 
 **The solution**: A **perception cascade** that progressively trades temporal resolution for semantic density:
 
@@ -67,10 +55,10 @@ This architecture is proven in production BCI systems (BrainFlow + Lab Streaming
 
 ```
 ┌──────────────────────────────────────────────────────────────┐
-│  PiEEG-server (hardware or mock)                             │
+│  Any LSL EEG source (PiEEG, OpenBCI, Muse, mock, etc.)      │
 │    └─> Lab Streaming Layer (LSL) outlet                      │
 └────────────────────────┬─────────────────────────────────────┘
-                         │ 250 Hz × 8 channels
+                         │ High-rate multi-channel EEG
                          ▼
 ┌──────────────────────────────────────────────────────────────┐
 │  PERCEIVE: Ring buffer + cascade                             │
@@ -78,19 +66,29 @@ This architecture is proven in production BCI systems (BrainFlow + Lab Streaming
 │    • Features: FFT → band powers (δθαβγ), quality scores     │
 │    • State: EMA smoothing → focus/relax/engagement [0-1]     │
 │    • Events: debounced transitions ("focus_high" @timestamp) │
+│    • Artifacts: blink/jaw/movement detection                 │
 └────────────────────────┬─────────────────────────────────────┘
                          │ 1 Hz state + sparse events
                          ▼
 ┌──────────────────────────────────────────────────────────────┐
+│  DECODE: ML + lab features                                   │
+│    • Patterns: L2+group-lasso binary classifiers (LORO-CV)   │
+│    • Connectivity: cross-channel amplitude coupling (r)      │
+│    • Sessions: labelled windows + Cohen's d comparison       │
+└────────────────────────┬─────────────────────────────────────┘
+                         │ tool-callable summaries
+                         ▼
+┌──────────────────────────────────────────────────────────────┐
 │  REASON: LLM copilot (provider-agnostic)                     │
-│    • Tools: get_neural_state, get_band_powers, get_events    │
+│    • Tools: neural state, patterns, connectivity, sessions   │
 │    • Providers: Anthropic, OpenAI, Groq, Ollama, LM Studio   │
 │    • No vendor SDK — plain HTTP via stdlib                   │
+│    • Web UI: FastAPI + React/TS (same copilot backend)       │
 └────────────────────────┬─────────────────────────────────────┘
                          │ tool calls
                          ▼
 ┌──────────────────────────────────────────────────────────────┐
-│  ACT: Gated control plane (opt-in)                           │
+│  ACT: Gated control plane (opt-in, PiEEG-server only)        │
 │    • WebSocket → PiEEG-server :1616                          │
 │    • Allowlist + dry-run + cooldown + audit log              │
 │    • Filter, recording, OSC, register presets                │
@@ -101,22 +99,23 @@ This architecture is proven in production BCI systems (BrainFlow + Lab Streaming
 - **Scientifically honest**: Indices are within-session relative, not clinical claims. Warm-up and poor signal are surfaced before giving numbers.
 - **Debuggable**: Channel-level quality verdicts, event logs with timestamps, tool call traces.
 - **Decoupled**: Swap LLM providers without changing perception. Run perception without LLM. Test with mock signal.
+- **Lab-grade features**: Pattern training (regularized classifiers + LORO-CV), connectivity analysis (amplitude coupling), session comparison (Cohen's d) — all in natural language.
 - **Safe by default**: Device actions require opt-in flags and are audited.
 
 ---
 
 ## 📖 Usage Examples
 
-### 1. Prove the Intake (no LLM needed)
+### 1. Discover & Validate LSL Streams
 
-Validate that your system can keep up with high-rate EEG:
+Works with any LSL source (PiEEG, OpenBCI, Muse, EMOTIV, etc.):
 
 ```bash
-pieeg-agent streams              # discover LSL outlets on network
+pieeg-agent streams              # discover all LSL outlets on network
 pieeg-agent ingest --seconds 10  # drain stream, print throughput stats
 ```
 
-Exits with code 0 only if no samples lost and ring never overflows — a real end-to-end test.
+Exits with code 0 only if no samples lost and ring never overflows — validates your LSL source.
 
 ### 2. Monitor Live State
 
@@ -162,7 +161,7 @@ Keeps conversation context:
 ```
 you > how's my signal?
   (calls: get_channel_quality)
-copilot > All 8 channels read "good", quality score 0.98 — trustworthy signal.
+copilot > All channels read "good", quality score 0.98 — trustworthy signal.
 
 you > am I focused or relaxed?
   (calls: get_neural_state)
@@ -176,7 +175,84 @@ copilot > Relaxation spiked to 0.81 about 35 seconds ago, no quality issues sinc
 
 Press Ctrl+D to exit.
 
-### 5. Device Control (Gated)
+### 5. Web UI — Chat + Live Brain View
+
+```bash
+pieeg-agent web
+# → http://localhost:8765
+```
+
+Opens a browser-based interface with:
+- **Live chat** — same multi-turn conversation as CLI, with streaming responses
+- **Brain state cards** — real-time focus/relax/engagement, band powers, quality, connectivity
+- **Pattern training UI** — record/compare mental states with visual progress
+- **Artifact feed** — scrolling log of signal events
+
+All powered by the SAME copilot + cascade + tools as CLI — web is just another front-end.
+
+Backend: FastAPI + WebSocket streams (snapshot @ 2 Hz, chat events)  
+Frontend: Vite + React/TypeScript, single-page app, dark theme
+
+### 6. Lab Notebook — Pattern Recognition & Connectivity
+
+**Pattern Training** (record and compare mental states):
+```bash
+you > record a pattern called "eyes-closed-rest" for 20 seconds
+  (calls: record_segment)
+copilot > Got it. Hold still... [20s window captured]
+          Saved with 0.94 signal quality, alpha dominant.
+
+you > record "eyes-open-focus" for 20 seconds
+  [repeat]
+
+you > train a classifier from those two patterns
+  (calls: train_pattern)
+copilot > Trained "focus-vs-rest" with balanced accuracy 0.89 (LORO-CV).
+          Top cue: beta increase in channels C3/C4.
+
+you > explain the focus-vs-rest pattern
+  (calls: explain_pattern)
+copilot > [Shows channel importance, feature weights, CV score]
+```
+
+Pattern classifiers use:
+- **L2 + group-lasso regularization** for spatial sparsity
+- **Leave-One-Rep-Out CV** (no temporal leakage)
+- **Balanced accuracy** (mean of sensitivity/specificity)
+- **Channel importance** shows which electrodes matter
+
+**Connectivity Analysis** (cross-channel coupling):
+```bash
+you > show me connectivity in the alpha band
+  (calls: connectivity)
+copilot > Mean alpha coupling: 0.34 across all channels.
+          Strongest pair: C3–C4 (r=0.72)
+          Most connected: C3, least: Fp1
+
+you > record a session called "meditation" for 60 seconds
+  (calls: record_session)
+copilot > Captured 60s window: alpha dominant (0.81), high relaxation (0.76),
+          strong C3–C4 coupling (0.68). Saved to session store.
+
+you > compare my "meditation" session to "baseline-rest"
+  (calls: compare_sessions)
+copilot > [Contrasts with Cohen's d per feature]
+          Biggest change: alpha power +0.92 SD
+          Relaxation: +0.71 SD
+          C3–C4 coupling: +0.45 SD
+```
+
+Sessions capture:
+- Band power means/spreads per channel
+- Focus/relax/engagement indices with variance
+- Artifact counts + quality scores
+- Connectivity (if n_frames ≥ 8)
+
+Comparison uses **within-session Cohen's d** (descriptive effect size, NOT a clinical/generalisation claim).
+
+### 7. Device Control (PiEEG-server only)
+
+**Optional control plane** for PiEEG hardware. Not needed for other LSL sources.
 
 **Direct control** (you invoke explicitly):
 ```bash
@@ -293,8 +369,12 @@ python -m pieeg_agent.llm.factory --provider anthropic
 - [x] **Phase 1**: Perception cascade (features → state → events)
 - [x] **Phase 2**: LLM copilot (read-only tools, provider-agnostic)
 - [x] **Phase 3**: Gated device actions (allowlist, dry-run, audit)
-- [ ] **Phase 4**: Multi-modal (EEG + EOG + EMG streams, fusion tools)
-- [ ] **Phase 5**: Session memory (vector store for long-term patterns)
+- [x] **Phase A**: Artifact detection (blinks, jaw, movement) + quality tracking
+- [x] **Phase B**: Pattern training (L2+group-lasso, LORO-CV, balanced accuracy)
+- [x] **Phase C**: Web UI (FastAPI + React/TS, chat + live brain cards)
+- [x] **Phase D**: Connectivity analysis + session comparison (lab notebook tools)
+- [ ] **Phase E**: P300 event-related potential decoder (single-trial BCI control)
+- [ ] **Phase F**: Multi-modal fusion (EEG + EOG + EMG streams, cross-modal tools)
 
 ---
 
