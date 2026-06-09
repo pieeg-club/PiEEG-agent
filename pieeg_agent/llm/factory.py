@@ -16,6 +16,7 @@ from __future__ import annotations
 
 from ..config import PROVIDERS, AgentConfig
 from .anthropic import AnthropicProvider
+from .echo import EchoProvider
 from .openai_compat import OpenAICompatProvider
 from .provider import LLMProvider
 
@@ -58,6 +59,13 @@ def get_provider(config: AgentConfig, *, timeout: float = 60.0) -> LLMProvider:
             model=config.model,
             base_url=config.base_url,
             timeout=timeout,
+        )
+    if kind == "echo":
+        return EchoProvider(
+            api_key="",  # not needed
+            model=config.model,
+            base_url="",
+            timeout=0.0,
         )
     raise ProviderError(
         f"Provider {config.provider!r} has unsupported kind {kind!r}."

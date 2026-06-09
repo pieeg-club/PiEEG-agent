@@ -75,6 +75,13 @@ PROVIDERS: dict[str, dict] = {
         "base_url": "http://localhost:1234/v1",
         "default_model": "local-model",
     },
+    "echo": {
+        "label": "Echo (debug)",
+        "kind": "echo",
+        "env_key": "",  # no key needed
+        "base_url": "",
+        "default_model": "echo-debug-v1",
+    },
 }
 
 DEFAULT_PROVIDER = "anthropic"

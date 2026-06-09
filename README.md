@@ -14,7 +14,7 @@ pieeg-server --mock --lsl
 
 # Terminal 2: Launch web UI
 pip install -e .
-export ANTHROPIC_API_KEY=sk-ant-...  # or use ollama/openai/groq
+export ANTHROPIC_API_KEY=sk-ant-...  # or use --provider echo for testing
 pieeg-agent web
 ```
 
@@ -141,9 +141,16 @@ Prints every second:
 export ANTHROPIC_API_KEY=sk-ant-...
 pieeg-agent ask "am I focused?"
 pieeg-agent ask --provider ollama --model llama3.2 "is my signal clean?"
+pieeg-agent ask --provider echo "test without an API key"  # debug mode, no LLM
 ```
 
-Supported providers: `anthropic` (default), `openai`, `groq`, `together`, `ollama`, `lmstudio`.
+Supported providers: `anthropic` (default), `openai`, `groq`, `together`, `ollama`, `lmstudio`, `echo` (debug).
+
+**Debug mode**: Use `--provider echo` to test without API keys or network calls. The echo provider:
+- **Simulates LLM responses** based on keyword matching (not real language understanding)
+- **Executes real tool calls** — you see actual EEG data from the perception cascade
+- **Shows system status** — tool count, perception connection, detected keywords
+- Useful for frontend development, integration testing, and validating the perception pipeline
 
 The model calls tools:
 - `get_neural_state()` → focus/relax/engagement + dominant band
@@ -342,6 +349,11 @@ pytest tests/
 # Test with mock signal (deterministic)
 pieeg-server --mock --lsl
 pieeg-agent monitor --seconds 10
+
+# Test with echo provider (no API key needed)
+pieeg-agent web --provider echo                    # web UI with debug mode
+pieeg-agent chat --provider echo                   # CLI chat, tool calls are real
+pieeg-agent ask --provider echo "what is my focus level?"  # triggers get_neural_state tool
 
 # Test provider without EEG stream
 python -m pieeg_agent.llm.factory --provider anthropic
