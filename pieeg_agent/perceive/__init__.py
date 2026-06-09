@@ -14,6 +14,7 @@ Nothing here imports an LLM; this is pure perception.
 
 from __future__ import annotations
 
+from .artifacts import ArtifactEvent, ArtifactMonitor
 from .cascade import CascadeConfig, PerceptionCascade
 from .events import EventDetector, NeuralEvent
 from .features import BANDS, BAND_NAMES, BandPowerExtractor, BandPowers
@@ -32,6 +33,8 @@ __all__ = [
     "NeuralState",
     "EventDetector",
     "NeuralEvent",
+    "ArtifactMonitor",
+    "ArtifactEvent",
     "PerceptionCascade",
     "CascadeConfig",
 ]

@@ -26,6 +26,7 @@ import logging
 import os
 import sys
 import time
+from dataclasses import dataclass
 from pathlib import Path
 
 from . import __version__
@@ -184,6 +185,24 @@ def _build_parser() -> argparse.ArgumentParser:
     sub.add_parser(
         "chat", parents=[common],
         help="Open an interactive chat with the brain copilot.",
+    )
+
+    p_web = sub.add_parser(
+        "web", parents=[common],
+        help="Serve the graphical web UI (streaming chat + live brain panel + "
+        "guided pattern training) — same copilot as the CLI.",
+    )
+    p_web.add_argument(
+        "--host", default="127.0.0.1",
+        help="Bind address (default: 127.0.0.1; use 0.0.0.0 to expose on LAN).",
+    )
+    p_web.add_argument(
+        "--port", type=int, default=8000, help="Bind port (default: 8000)."
+    )
+    p_web.add_argument(
+        "--static-dir", default=None,
+        help="Built front-end directory to serve (default: frontend/dist if "
+        "present).",
     )
 
     # ── direct gated server control (Phase 3) ───────────────────────────
@@ -502,6 +521,7 @@ def cmd_monitor(args) -> int:
         ),
         on_state=None if args.quiet else _print_state_line,
         on_event=_print_event_line,
+        on_artifact=_print_artifact_line,
     )
     cascade.start()
 
@@ -559,13 +579,28 @@ def _connect_eeg_inlet(cfg):
     return inlet if inlet.connect_info(ranked[0]) else None
 
 
-def _start_copilot(args):
-    """Bring up inlet + cascade + copilot for the ``ask`` / ``chat`` commands.
+@dataclass
+class _CopilotSession:
+    """The assembled live stack shared by ``ask`` / ``chat`` / ``web``."""
 
-    Returns ``(copilot, inlet, cascade, client)`` on success or ``None`` after
-    printing an actionable error (missing stream, unconfigured provider,
-    unreachable control plane). ``client`` is the server control connection
-    when ``--allow-actions`` is set, otherwise ``None``.
+    copilot: object
+    inlet: object
+    cascade: object
+    client: object
+    senses: object
+    decode: object
+    cfg: object
+
+
+def _start_copilot(args):
+    """Bring up inlet + cascade + copilot for the ``ask`` / ``chat`` / ``web``
+    commands.
+
+    Returns a :class:`_CopilotSession` on success or ``None`` after printing an
+    actionable error (missing stream, unconfigured provider, unreachable
+    control plane). ``client`` is the server control connection when
+    ``--allow-actions`` is set, otherwise ``None``; ``senses`` / ``decode`` are
+    exposed so the web layer can read the same live state the copilot does.
     """
     from .agent import (
         ACTUATOR_SYSTEM_PROMPT,
@@ -573,6 +608,7 @@ def _start_copilot(args):
         SYSTEM_PROMPT,
         CombinedToolset,
         Copilot,
+        DecodeTools,
         NeuralTools,
     )
     from .llm import ProviderError, get_provider
@@ -625,6 +661,12 @@ def _start_copilot(args):
 
     inlet.start()
     cascade = PerceptionCascade(inlet, CascadeConfig(mains_hz=args.mains))
+    senses = NeuralTools(cascade)
+    decode = DecodeTools(cascade)
+    # Drive the live pattern bank (and any in-progress training capture) from
+    # every cascade frame. Wired here because cascade and decoder reference
+    # each other.
+    cascade.set_on_frame(decode.on_frame)
     cascade.start()
 
     # Let the cascade fill its first analysis window so early questions have a
@@ -633,13 +675,21 @@ def _start_copilot(args):
         print(f"Warming up ({args.warmup:.0f}s)\u2026")
         _wait_for_state(cascade, args.warmup)
 
-    senses = NeuralTools(cascade)
     if actuator is not None:
-        tools = CombinedToolset(senses, actuator)
+        tools = CombinedToolset(senses, decode, actuator)
         copilot = Copilot(provider, tools, system=ACTUATOR_SYSTEM_PROMPT)
     else:
-        copilot = Copilot(provider, senses, system=SYSTEM_PROMPT)
-    return copilot, inlet, cascade, client
+        tools = CombinedToolset(senses, decode)
+        copilot = Copilot(provider, tools, system=SYSTEM_PROMPT)
+    return _CopilotSession(
+        copilot=copilot,
+        inlet=inlet,
+        cascade=cascade,
+        client=client,
+        senses=senses,
+        decode=decode,
+        cfg=cfg,
+    )
 
 
 def _build_actuator(args, cfg, safe_actions):
@@ -737,7 +787,9 @@ def cmd_ask(args) -> int:
     started = _start_copilot(args)
     if started is None:
         return 1
-    copilot, inlet, cascade, client = started
+    copilot, inlet, cascade, client = (
+        started.copilot, started.inlet, started.cascade, started.client
+    )
     try:
         result = copilot.ask(args.question)
     except Exception as exc:
@@ -759,7 +811,9 @@ def cmd_chat(args) -> int:
     started = _start_copilot(args)
     if started is None:
         return 1
-    copilot, inlet, cascade, client = started
+    copilot, inlet, cascade, client = (
+        started.copilot, started.inlet, started.cascade, started.client
+    )
     print(
         "\nChatting with PiEEG Copilot. Ask about focus, relaxation, signal "
         "quality\u2026\nType 'exit' (or Ctrl+D) to quit.\n"
@@ -789,6 +843,74 @@ def cmd_chat(args) -> int:
         if client is not None:
             client.close()
     print("Bye.")
+    return 0
+
+
+def _default_static_dir() -> str | None:
+    """The built front-end directory (``frontend/dist``), if it exists.
+
+    Looks next to the repo root so a plain ``pieeg-agent web`` serves the UI
+    after ``npm run build`` with no flags. Returns ``None`` when unbuilt, in
+    which case the API still runs (use the Vite dev server in development).
+    """
+    candidate = Path(__file__).resolve().parent.parent / "frontend" / "dist"
+    return str(candidate) if candidate.is_dir() else None
+
+
+def cmd_web(args) -> int:
+    """Serve the graphical web UI over the same copilot + cascade as the CLI."""
+    try:
+        import uvicorn
+    except ImportError:
+        print(
+            "The web UI needs FastAPI/uvicorn. Install the extra:\n"
+            "  pip install 'pieeg-agent[web]'",
+            file=sys.stderr,
+        )
+        return 2
+
+    started = _start_copilot(args)
+    if started is None:
+        return 1
+
+    from .web import WebEngine, create_app
+
+    inlet = started.inlet
+    info = {
+        "stream": inlet.stream_name,
+        "channels": inlet.num_channels,
+        "rate": round(inlet.sample_rate, 1),
+        "provider": started.cfg.provider,
+        "model": started.cfg.model,
+        "control": started.client is not None,
+    }
+    engine = WebEngine(
+        copilot=started.copilot,
+        senses=started.senses,
+        decode=started.decode,
+        info=info,
+    )
+    static_dir = args.static_dir or _default_static_dir()
+    app = create_app(engine, static_dir=static_dir)
+
+    url = f"http://{args.host}:{args.port}"
+    print(f"\nPiEEG Agent web UI on {url}   (Ctrl+C to stop)")
+    if static_dir and Path(static_dir).is_dir():
+        print(f"  serving front-end from {static_dir}")
+    else:
+        print("  front-end not built \u2014 API live at /api and /ws.")
+        print("  build it:  cd frontend && npm install && npm run build")
+        print("  or dev:    cd frontend && npm run dev   (proxies to this API)")
+
+    try:
+        uvicorn.run(app, host=args.host, port=args.port, log_level="warning")
+    except KeyboardInterrupt:  # pragma: no cover - interactive
+        pass
+    finally:
+        started.cascade.stop()
+        inlet.stop()
+        if started.client is not None:
+            started.client.close()
     return 0
 
 
@@ -1020,6 +1142,14 @@ def _print_event_line(event) -> None:
     print(f"   {mark} {ts}  {event.type}  -  {event.detail}")
 
 
+def _print_artifact_line(art) -> None:
+    ts = time.strftime("%H:%M:%S", time.localtime(art.timestamp))
+    print(
+        f"   ·· {ts}  {art.type}  -  {art.detail} "
+        f"({art.confidence:.0%} conf)"
+    )
+
+
 # ── dispatch ───────────────────────────────────────────────────────────────
 
 
@@ -1038,6 +1168,8 @@ def main(argv: list[str] | None = None) -> int:
         return cmd_ask(args)
     if args.command == "chat":
         return cmd_chat(args)
+    if args.command == "web":
+        return cmd_web(args)
     if args.command == "control":
         return cmd_control(args)
     if args.command == "config":

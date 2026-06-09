@@ -15,6 +15,7 @@ from __future__ import annotations
 import json
 import urllib.error
 import urllib.request
+from typing import Iterator
 
 
 class LLMHTTPError(RuntimeError):
@@ -78,6 +79,58 @@ def _read_error_body(exc: urllib.error.HTTPError) -> str:
         return exc.read().decode("utf-8")
     except Exception:  # pragma: no cover - body already consumed/unreadable
         return str(exc.reason)
+
+
+def post_sse(
+    url: str,
+    payload: dict,
+    headers: dict[str, str],
+    *,
+    timeout: float = 60.0,
+) -> Iterator[dict]:
+    """POST ``payload`` and yield each server-sent ``data:`` event as a dict.
+
+    Both the Anthropic and OpenAI streaming wire formats are line-oriented SSE:
+    one JSON object per ``data:`` line, comment lines starting with ``:``, and
+    an optional ``[DONE]`` sentinel. We ignore ``event:`` lines and rely on the
+    JSON payload itself (each adapter knows how to read its own chunks).
+
+    Errors are normalised to :class:`LLMHTTPError`, matching :func:`post_json`,
+    so streaming and blocking callers handle failures the same way.
+    """
+    body = json.dumps(payload).encode("utf-8")
+    req = urllib.request.Request(url, data=body, method="POST")
+    req.add_header("content-type", "application/json")
+    req.add_header("accept", "text/event-stream")
+    for key, value in headers.items():
+        req.add_header(key, value)
+
+    try:
+        resp = urllib.request.urlopen(req, timeout=timeout)
+    except urllib.error.HTTPError as exc:  # 4xx / 5xx with a body
+        detail = _read_error_body(exc)
+        raise LLMHTTPError(
+            f"HTTP {exc.code} from {url}: {_short(detail)}",
+            status=exc.code,
+            body=detail,
+        ) from exc
+    except urllib.error.URLError as exc:  # DNS, refused, timeout, TLS, …
+        raise LLMHTTPError(
+            f"Could not reach {url}: {exc.reason}", status=0
+        ) from exc
+
+    with resp:
+        for raw_line in resp:
+            line = raw_line.decode("utf-8").strip()
+            if not line or line.startswith(":") or not line.startswith("data:"):
+                continue
+            data = line[len("data:"):].strip()
+            if data == "[DONE]":
+                return
+            try:
+                yield json.loads(data)
+            except json.JSONDecodeError:  # keep-alive / partial — skip
+                continue
 
 
 def _short(text: str, limit: int = 300) -> str:

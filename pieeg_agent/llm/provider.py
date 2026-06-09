@@ -21,7 +21,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from typing import Any, Literal
+from typing import Any, Iterator, Literal
 
 Role = Literal["user", "assistant", "tool"]
 
@@ -90,6 +90,29 @@ class LLMResponse:
         return bool(self.tool_calls)
 
 
+@dataclass
+class StreamEvent:
+    """One incremental event from :meth:`LLMProvider.stream_complete`.
+
+    The stream is a flat sequence of these. Consumers care about three kinds:
+
+    * ``type="text"`` — ``text`` is the next chunk of assistant prose. These
+      arrive in order and should be appended/displayed as they come.
+    * ``type="tool_call"`` — ``tool_call`` is a *fully assembled* tool request.
+      It is emitted once the provider has finished streaming that call's
+      arguments (so it may arrive near the end for back-ends that stream
+      argument JSON incrementally).
+    * ``type="final"`` — ``response`` is the complete :class:`LLMResponse`
+      (full text + all tool calls + usage + stop reason). Always the last
+      event, even when the turn produced no text or tools.
+    """
+
+    type: Literal["text", "tool_call", "final"]
+    text: str = ""
+    tool_call: ToolCall | None = None
+    response: LLMResponse | None = None
+
+
 class LLMProvider(ABC):
     """Abstract base every backend adapter implements.
 
@@ -116,6 +139,36 @@ class LLMProvider(ABC):
     ) -> LLMResponse:
         """Run one completion turn and return a normalized response."""
         raise NotImplementedError
+
+    def stream_complete(
+        self,
+        *,
+        system: str,
+        messages: list[Message],
+        tools: list[ToolSpec] | None = None,
+        max_tokens: int = 1024,
+        temperature: float = 0.0,
+    ) -> Iterator[StreamEvent]:
+        """Stream one completion turn as a sequence of :class:`StreamEvent`.
+
+        The default implementation falls back to a single blocking
+        :meth:`complete` and replays its result as one text event, then the
+        tool calls, then the terminal ``final`` event. Adapters with native
+        server-sent-events override this to emit real token deltas; either way
+        the consumer contract is identical, so callers can always stream.
+        """
+        response = self.complete(
+            system=system,
+            messages=messages,
+            tools=tools,
+            max_tokens=max_tokens,
+            temperature=temperature,
+        )
+        if response.text:
+            yield StreamEvent(type="text", text=response.text)
+        for call in response.tool_calls:
+            yield StreamEvent(type="tool_call", tool_call=call)
+        yield StreamEvent(type="final", response=response)
 
     @classmethod
     def available(cls) -> bool:

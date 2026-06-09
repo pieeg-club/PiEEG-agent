@@ -24,8 +24,9 @@ from __future__ import annotations
 import json
 import logging
 from dataclasses import dataclass, field
+from typing import Any, Generator, Iterator, Literal
 
-from ..llm.provider import LLMProvider, Message, Usage
+from ..llm.provider import LLMProvider, LLMResponse, Message, Usage
 from .tools import Toolset
 
 logger = logging.getLogger("pieeg.agent.copilot")
@@ -35,9 +36,42 @@ You are PiEEG Copilot, a concise assistant embedded in a live brain-computer \
 interface. A person is wearing an EEG headset connected to PiEEG-server, and \
 its signal is reduced for you into language-sized facts you read through tools.
 
-You can call read-only tools to inspect the current neural state, band powers, \
-recent events and per-channel signal quality. Always ground claims about the \
-brain in a tool call from this session — never invent numbers.
+Your senses (all read-only tools, always ground claims in a fresh call):
+- get_neural_state / get_band_powers — the smoothed ~1 Hz state and spectral \
+shape. focus / relax / engagement are convenience indices, not the whole story.
+- analyze_spectrum — deeper spectral detail: individual alpha-peak frequency, \
+aperiodic 1/f slope, theta/beta ratio, entropy, frontal alpha asymmetry.
+- find_artifacts — discrete events: blinks (and double-blinks), jaw clenches, \
+motion. Use these for "did I just blink/clench" and to explain quality drops.
+- get_recent_events / get_channel_quality — transitions and per-channel signal \
+quality.
+- connectivity — cross-channel amplitude coupling right now (how the electrodes' \
+band-power envelopes move together). Use this for "which channels are coupled" \
+or "how connected is the alpha band".
+
+Trainable patterns are your most powerful sense — prefer them when the user \
+asks about a specific learned state:
+- list_patterns / detect_patterns — what you can recognise, and which patterns \
+are firing right now. explain_pattern justifies one (its cross-validated score, \
+which channels it reads). A trained detector is far more meaningful than the \
+generic focus/relax indices.
+- To TEACH a new pattern, run the guided flow and narrate each step to the \
+user: start_pattern_training(name) → then alternate record_segment(label="rest")\
+ while they relax and record_segment(label="active") while they do the thing, \
+3-5 reps → finish_pattern_training. Always tell the user what to do *before* \
+each record_segment, since it samples the live signal immediately. Report the \
+balanced accuracy honestly: under ~0.7 is weak, treat it as a draft.
+
+The lab notebook (sessions) is for labelled windows you record and compare:
+- record_session(label, seconds) captures a window (e.g. "eyes-closed-rest" for \
+20s) and saves a summary: band means/spread, focus/relax/engagement, signal \
+quality, artifacts, connectivity. Tell the user what to do *before* calling.
+- list_sessions / analyze_session — what windows you've recorded and re-open \
+any by label.
+- compare_sessions(a, b) contrasts two session summaries with Cohen's d per \
+feature (band powers, focus/relax/engagement, quality), ranked by effect size. \
+Use this for "what changed between my rest and my focus block".
+- forget_session(label) deletes a saved recording.
 
 Be honest about the metrics:
 - focus / relax / engagement are 0..1 values **relative to this session's own \
@@ -46,6 +80,8 @@ right now".
 - If a state reports warming_up=true, say the readings are still settling.
 - If signal quality is poor or channels are flagged, say so before drawing \
 conclusions; bad electrodes make the indices meaningless.
+- Cohen's d from compare_sessions is within-session descriptive only, not a \
+generalisation or clinical claim.
 
 You observe and explain; you do not control the device in this mode. Keep \
 answers short and plain. If no data is available yet, say the stream is still \
@@ -74,6 +110,30 @@ class CopilotResult:
     text: str
     tool_calls: list[str] = field(default_factory=list)
     usage: Usage = field(default_factory=Usage)
+    iterations: int = 0
+
+
+@dataclass
+class CopilotEvent:
+    """One incremental event from :meth:`Copilot.ask_stream`.
+
+    A single ``ask_stream`` call emits a flat sequence:
+
+    * ``token`` — ``text`` is the next chunk of the assistant's prose.
+    * ``tool_start`` — the model asked to run ``name``; ``arguments`` is the
+      parsed input. Emitted just before the tool executes so a UI can show it.
+    * ``tool_result`` — that tool finished; ``result`` is its return payload.
+    * ``done`` — terminal event carrying the full ``text``, the ordered
+      ``tool_calls`` that ran, accumulated ``usage`` and ``iterations``.
+    """
+
+    type: Literal["token", "tool_start", "tool_result", "done"]
+    text: str = ""
+    name: str = ""
+    arguments: dict = field(default_factory=dict)
+    result: Any = None
+    usage: Usage = field(default_factory=Usage)
+    tool_calls: list[str] = field(default_factory=list)
     iterations: int = 0
 
 
@@ -111,20 +171,35 @@ class Copilot:
         """Answer ``question``, running tool calls as the model requests them.
 
         Conversation history is preserved across calls so follow-ups have
-        context. The tool-use loop is bounded by ``max_tool_iters``.
+        context. The tool-use loop is bounded by ``max_tool_iters``. This is a
+        thin blocking wrapper over :meth:`ask_stream`, so both the CLI and the
+        streaming web surface drive the exact same loop.
+        """
+        done = CopilotEvent(type="done")
+        for event in self.ask_stream(question):
+            if event.type == "done":
+                done = event
+        return CopilotResult(
+            text=done.text,
+            tool_calls=done.tool_calls,
+            usage=done.usage,
+            iterations=done.iterations,
+        )
+
+    def ask_stream(self, question: str) -> Iterator[CopilotEvent]:
+        """Answer ``question`` incrementally, yielding :class:`CopilotEvent`.
+
+        Same bounded tool-use loop as :meth:`ask`, but assistant prose streams
+        out as ``token`` events and each tool call surfaces as a
+        ``tool_start`` / ``tool_result`` pair. The final ``done`` event mirrors
+        what :meth:`ask` would have returned.
         """
         self._history.append(Message(role="user", content=question))
 
         total = Usage()
         used_tools: list[str] = []
         for iteration in range(1, self._max_tool_iters + 1):
-            resp = self._provider.complete(
-                system=self._system,
-                messages=self._history,
-                tools=self._tools.specs(),
-                max_tokens=self._max_tokens,
-                temperature=self._temperature,
-            )
+            resp = yield from self._stream_turn(self._tools.specs())
             total = total + resp.usage
 
             # Record the assistant turn (text and/or tool requests).
@@ -137,18 +212,24 @@ class Copilot:
             )
 
             if not resp.wants_tools:
-                return CopilotResult(
+                yield CopilotEvent(
+                    type="done",
                     text=resp.text,
                     tool_calls=used_tools,
                     usage=total,
                     iterations=iteration,
                 )
+                return
 
             # Execute each requested tool and feed results back.
             for call in resp.tool_calls:
                 used_tools.append(call.name)
+                yield CopilotEvent(
+                    type="tool_start", name=call.name, arguments=call.arguments
+                )
                 result = self._tools.call(call.name, call.arguments)
                 logger.debug("tool %s(%s) -> %s", call.name, call.arguments, result)
+                yield CopilotEvent(type="tool_result", name=call.name, result=result)
                 self._history.append(
                     Message(
                         role="tool",
@@ -159,18 +240,36 @@ class Copilot:
 
         # Tool budget exhausted — make one final answer attempt without tools
         # so the user still gets a reply instead of silence.
-        final = self._provider.complete(
-            system=self._system,
-            messages=self._history,
-            tools=None,
-            max_tokens=self._max_tokens,
-            temperature=self._temperature,
-        )
+        final = yield from self._stream_turn(None)
         total = total + final.usage
+        text = final.text or "(stopped after the tool-call limit)"
         self._history.append(Message(role="assistant", content=final.text))
-        return CopilotResult(
-            text=final.text or "(stopped after the tool-call limit)",
+        yield CopilotEvent(
+            type="done",
+            text=text,
             tool_calls=used_tools,
             usage=total,
             iterations=self._max_tool_iters,
         )
+
+    def _stream_turn(
+        self, tools
+    ) -> "Generator[CopilotEvent, None, LLMResponse]":
+        """Stream one provider turn, yielding ``token`` events.
+
+        Returns (via ``StopIteration.value``, i.e. ``yield from``) the final
+        assembled :class:`LLMResponse` for the caller to act on.
+        """
+        response = LLMResponse()
+        for event in self._provider.stream_complete(
+            system=self._system,
+            messages=self._history,
+            tools=tools,
+            max_tokens=self._max_tokens,
+            temperature=self._temperature,
+        ):
+            if event.type == "text" and event.text:
+                yield CopilotEvent(type="token", text=event.text)
+            elif event.type == "final" and event.response is not None:
+                response = event.response
+        return response

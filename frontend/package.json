@@ -1,0 +1,24 @@
+{
+  "name": "pieeg-agent-ui",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Graphical web UI for the PiEEG brain copilot — streaming chat + live brain panel + guided pattern training.",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc -b && vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  "devDependencies": {
+    "@types/node": "^22.9.0",
+    "@types/react": "^18.3.12",
+    "@types/react-dom": "^18.3.1",
+    "@vitejs/plugin-react": "^4.3.3",
+    "typescript": "^5.6.3",
+    "vite": "^5.4.10"
+  }
+}

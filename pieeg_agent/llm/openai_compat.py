@@ -17,12 +17,14 @@ Translation notes versus the normalized surface:
 from __future__ import annotations
 
 import json
+from typing import Iterator
 
-from ._http import post_json
+from ._http import post_json, post_sse
 from .provider import (
     LLMProvider,
     LLMResponse,
     Message,
+    StreamEvent,
     ToolCall,
     ToolSpec,
     Usage,
@@ -76,6 +78,95 @@ class OpenAICompatProvider(LLMProvider):
 
         data = post_json(self._url, payload, headers=headers, timeout=self._timeout)
         return _decode_response(data)
+
+    def stream_complete(
+        self,
+        *,
+        system: str,
+        messages: list[Message],
+        tools: list[ToolSpec] | None = None,
+        max_tokens: int = 1024,
+        temperature: float = 0.0,
+    ) -> Iterator[StreamEvent]:
+        wire: list[dict] = []
+        if system:
+            wire.append({"role": "system", "content": system})
+        wire.extend(_encode_message(m) for m in messages)
+
+        payload: dict = {
+            "model": self.model,
+            "max_tokens": max_tokens,
+            "temperature": temperature,
+            "messages": wire,
+            "stream": True,
+            # Ask for a trailing usage chunk; back-ends that don't support it
+            # ignore the field, so token counts are best-effort while streaming.
+            "stream_options": {"include_usage": True},
+        }
+        if tools:
+            payload["tools"] = [_encode_tool(t) for t in tools]
+
+        headers = {}
+        if self._key:
+            headers["authorization"] = f"Bearer {self._key}"
+
+        text_parts: list[str] = []
+        # tool-call index → incremental {id, name, args fragments}
+        frags: dict[int, dict] = {}
+        usage = Usage()
+        stop_reason = ""
+
+        for chunk in post_sse(self._url, payload, headers=headers, timeout=self._timeout):
+            u = chunk.get("usage")
+            if u:
+                usage.input_tokens = int(u.get("prompt_tokens", 0))
+                usage.output_tokens = int(u.get("completion_tokens", 0))
+
+            choices = chunk.get("choices") or []
+            if not choices:
+                continue
+            choice = choices[0]
+            delta = choice.get("delta", {}) or {}
+
+            content = delta.get("content")
+            if content:
+                text_parts.append(content)
+                yield StreamEvent(type="text", text=content)
+
+            for tc in delta.get("tool_calls") or []:
+                idx = int(tc.get("index", 0))
+                slot = frags.setdefault(idx, {"id": "", "name": "", "args": []})
+                if tc.get("id"):
+                    slot["id"] = tc["id"]
+                fn = tc.get("function", {}) or {}
+                if fn.get("name"):
+                    slot["name"] = fn["name"]
+                if fn.get("arguments"):
+                    slot["args"].append(fn["arguments"])
+
+            if choice.get("finish_reason"):
+                stop_reason = choice["finish_reason"]
+
+        tool_calls: list[ToolCall] = []
+        for idx in sorted(frags):
+            slot = frags[idx]
+            call = ToolCall(
+                id=slot["id"],
+                name=slot["name"],
+                arguments=_parse_arguments("".join(slot["args"])),
+            )
+            tool_calls.append(call)
+            yield StreamEvent(type="tool_call", tool_call=call)
+
+        yield StreamEvent(
+            type="final",
+            response=LLMResponse(
+                text="".join(text_parts).strip(),
+                tool_calls=tool_calls,
+                usage=usage,
+                stop_reason=stop_reason,
+            ),
+        )
 
     @classmethod
     def available(cls) -> bool:

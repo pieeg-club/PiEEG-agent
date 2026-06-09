@@ -21,6 +21,9 @@ from collections import deque
 from dataclasses import dataclass
 from typing import Callable
 
+import numpy as np
+
+from .artifacts import ArtifactEvent, ArtifactMonitor
 from .events import EventDetector, NeuralEvent
 from .features import BandPowerExtractor, BandPowers
 from .quality import QualityMonitor, SignalQuality
@@ -44,10 +47,15 @@ class CascadeConfig:
     event_min_dwell: float = 2.0
     quality_floor: float = 0.5
     events_keep: int = 256        # ring depth for the recent-event log
+    detect_artifacts: bool = True  # run the blink / jaw / motion monitor
 
 
 OnState = Callable[[NeuralState], None]
 OnEvent = Callable[[NeuralEvent], None]
+OnArtifact = Callable[[ArtifactEvent], None]
+# (band_powers, quality, raw_window, timestamps) — for downstream decoders that
+# want every feature frame without the cascade importing them.
+OnFrame = Callable[[BandPowers, SignalQuality, np.ndarray, np.ndarray], None]
 
 
 class PerceptionCascade:
@@ -60,15 +68,23 @@ class PerceptionCascade:
         *,
         on_state: OnState | None = None,
         on_event: OnEvent | None = None,
+        on_artifact: OnArtifact | None = None,
+        on_frame: OnFrame | None = None,
     ):
         self._inlet = inlet
         self._cfg = config or CascadeConfig()
         self._on_state = on_state
         self._on_event = on_event
+        self._on_artifact = on_artifact
+        self._on_frame = on_frame
 
         srate = inlet.sample_rate or 250.0
         self._extractor = BandPowerExtractor(srate, self._cfg.fft_size)
         self._quality = QualityMonitor(srate, mains_hz=self._cfg.mains_hz)
+        self._artifacts = (
+            ArtifactMonitor(srate, inlet.channel_labels)
+            if self._cfg.detect_artifacts else None
+        )
         self._estimator = StateEstimator(
             ema_tau=self._cfg.ema_tau, norm_window=self._cfg.norm_window
         )
@@ -83,6 +99,7 @@ class PerceptionCascade:
         self._latest_bp: BandPowers | None = None
         self._latest_quality: SignalQuality | None = None
         self._event_log: deque[NeuralEvent] = deque(maxlen=self._cfg.events_keep)
+        self._artifact_log: deque[ArtifactEvent] = deque(maxlen=self._cfg.events_keep)
         self._lock = threading.Lock()
 
         self._thread: threading.Thread | None = None
@@ -109,6 +126,19 @@ class PerceptionCascade:
             self._thread.join(timeout)
             self._thread = None
 
+    def set_on_frame(self, callback: OnFrame | None) -> None:
+        """Attach or replace the per-frame callback.
+
+        Lets a live decoder (e.g. the pattern bank) be wired after the cascade
+        is built, since the two reference each other. A plain attribute write is
+        atomic in CPython, so this is safe to call while the worker runs.
+        """
+        self._on_frame = callback
+
+    def set_on_artifact(self, callback: OnArtifact | None) -> None:
+        """Attach or replace the artifact callback (see :meth:`set_on_frame`)."""
+        self._on_artifact = callback
+
     # ── pull-based access ───────────────────────────────────────────────
     def latest_state(self) -> NeuralState | None:
         with self._lock:
@@ -131,6 +161,12 @@ class PerceptionCascade:
             if n <= 0 or n >= len(self._event_log):
                 return list(self._event_log)
             return list(self._event_log)[-n:]
+
+    def recent_artifacts(self, n: int = 20) -> list[ArtifactEvent]:
+        with self._lock:
+            if n <= 0 or n >= len(self._artifact_log):
+                return list(self._artifact_log)
+            return list(self._artifact_log)[-n:]
 
     def stats(self) -> dict:
         with self._lock:
@@ -163,7 +199,7 @@ class PerceptionCascade:
             ring = self._inlet.ring
             if ring is None:
                 continue
-            data, _ts = ring.latest(self._cfg.fft_size)
+            data, ts = ring.latest(self._cfg.fft_size)
             self._ticks += 1
             if data.shape[0] < self._cfg.fft_size:
                 continue
@@ -178,10 +214,18 @@ class PerceptionCascade:
             dt = max(now - prev_mono, 1e-3)
             prev_mono = now
             self._estimator.update(bp, quality, dt)
+
+            artifacts: list[ArtifactEvent] = []
+            if self._artifacts is not None:
+                artifacts = self._artifacts.update(data, ts)
+
             with self._lock:
                 self._latest_bp = bp
                 self._latest_quality = quality
+                if artifacts:
+                    self._artifact_log.extend(artifacts)
             self._features += 1
+            self._dispatch_frame(bp, quality, data, ts, artifacts)
 
             since_state += 1
             if since_state < ticks_per_state:
@@ -211,3 +255,23 @@ class PerceptionCascade:
                     self._on_event(ev)
                 except Exception:  # pragma: no cover - callback is user code
                     logger.exception("on_event callback raised")
+
+    def _dispatch_frame(
+        self,
+        bp: BandPowers,
+        quality: SignalQuality,
+        data: np.ndarray,
+        ts: np.ndarray,
+        artifacts: list[ArtifactEvent],
+    ) -> None:
+        if self._on_frame is not None:
+            try:
+                self._on_frame(bp, quality, data, ts)
+            except Exception:  # pragma: no cover - callback is user code
+                logger.exception("on_frame callback raised")
+        for art in artifacts:
+            if self._on_artifact is not None:
+                try:
+                    self._on_artifact(art)
+                except Exception:  # pragma: no cover - callback is user code
+                    logger.exception("on_artifact callback raised")

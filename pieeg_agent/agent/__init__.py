@@ -18,10 +18,12 @@ from __future__ import annotations
 
 from .actuator_tools import SAFE_ACTIONS, ActuatorTools
 from .copilot import ACTUATOR_SYSTEM_PROMPT, SYSTEM_PROMPT, Copilot, CopilotResult
+from .decode_tools import DecodeTools
 from .tools import CombinedToolset, NeuralTools, Tool, Toolset
 
 __all__ = [
     "NeuralTools",
+    "DecodeTools",
     "Tool",
     "Toolset",
     "CombinedToolset",

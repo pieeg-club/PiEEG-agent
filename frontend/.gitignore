@@ -1,0 +1,8 @@
+# dependencies & build output
+node_modules/
+dist/
+
+# logs & caches
+*.log
+.vite/
+.DS_Store
