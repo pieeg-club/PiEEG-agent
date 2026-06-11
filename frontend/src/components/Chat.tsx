@@ -88,14 +88,12 @@ export function Chat({
   connected,
   onSend,
   onReset,
-  onHistory,
 }: {
   messages: ChatMessage[];
   busy: boolean;
   connected: boolean;
   onSend: (text: string) => void;
   onReset: () => void;
-  onHistory?: () => void;
 }) {
   const [text, setText] = useState("");
   const endRef = useRef<HTMLDivElement>(null);
@@ -154,11 +152,6 @@ export function Chat({
       </div>
 
       <div className="chat-bar">
-        {onHistory && (
-          <button className="link" onClick={onHistory}>
-            History
-          </button>
-        )}
         <button className="link" onClick={() => { onReset(); toast.info("Chat reset"); }}>
           Reset conversation
         </button>

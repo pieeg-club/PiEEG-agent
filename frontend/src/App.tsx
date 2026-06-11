@@ -64,6 +64,7 @@ export default function App() {
         onSettings={() => setShowSettings(true)}
         onSystem={() => setShowSystem(true)}
         onLogs={() => setShowLogs(true)}
+        onHistory={() => setShowHistory(true)}
       />
       <main className="layout">
         <Chat
@@ -72,7 +73,6 @@ export default function App() {
           connected={chat.connected}
           onSend={chat.send}
           onReset={chat.reset}
-          onHistory={() => setShowHistory(true)}
         />
         <aside className="brain">
           <StateCard state={snapshot?.state} />

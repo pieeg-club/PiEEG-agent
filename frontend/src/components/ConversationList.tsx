@@ -52,13 +52,15 @@ export function ConversationList({ currentId, onSelect, onNew, onClose }: Conver
   };
 
   return (
-    <div className="conversation-sidebar">
-      <div className="conversation-header">
-        <h2>Conversations</h2>
-        <button className="close-btn" onClick={onClose} title="Close">
-          ✕
-        </button>
-      </div>
+    <>
+      <div className="sidebar-overlay" onClick={onClose} />
+      <div className="conversation-sidebar">
+        <div className="conversation-header">
+          <h2>Conversations</h2>
+          <button className="close-btn" onClick={onClose} title="Close">
+            ✕
+          </button>
+        </div>
       
       <button className="new-conversation-btn" onClick={onNew}>
         + New Conversation
@@ -98,5 +100,6 @@ export function ConversationList({ currentId, onSelect, onNew, onClose }: Conver
         )}
       </div>
     </div>
+    </>
   );
 }
