@@ -20,6 +20,77 @@
 
 ---
 
+## 📦 Installation
+
+### One-Command Install
+
+#### Linux / macOS / WSL
+```bash
+# Remote install (clones repo + runs setup)
+curl -sSL https://raw.githubusercontent.com/pieeg-club/PiEEG-agent/main/install.sh | bash
+
+# Or clone and run setup locally
+git clone https://github.com/pieeg-club/PiEEG-agent.git
+cd PiEEG-agent
+chmod +x setup.sh && ./setup.sh
+```
+
+**What it does:**
+- ✅ Checks Python 3.10+
+- ✅ Creates virtual environment
+- ✅ Installs pieeg-agent with all dependencies
+- ✅ Symlinks `pieeg-agent` to PATH
+- ✅ Runs verification tests
+
+**No Node.js required** — the React frontend is prebuilt and included in the repository.
+
+#### Windows
+```cmd
+# Download and run install.cmd
+git clone https://github.com/pieeg-club/PiEEG-agent.git
+cd PiEEG-agent
+install.cmd
+```
+
+**Creates:**
+- `.venv\` — Python virtual environment
+- `pieeg-agent.cmd` — Launcher script
+
+**No Node.js required** — the React frontend is prebuilt.
+
+**Start the web interface:**
+```cmd
+pieeg-agent.cmd web
+```
+
+### Manual Install
+
+If you prefer manual control or the automated scripts don't work:
+
+```bash
+# Clone repository
+git clone https://github.com/pieeg-club/PiEEG-agent.git
+cd PiEEG-agent
+
+# Create virtual environment
+python3 -m venv .venv
+source .venv/bin/activate  # On Windows: .venv\Scripts\activate
+
+# Install Python package
+pip install -e ".[web,dev]"
+```
+
+**The React frontend is prebuilt** in `frontend/dist/` — no Node.js needed.
+
+**To rebuild frontend** (optional, for development):
+```bash
+cd frontend
+npm install
+npm run build
+```
+
+---
+
 ## ⚡ Quick Start: Full System with Web Interface
 
 ### Complete Setup (PiEEG Hardware + Web UI + Actions)
