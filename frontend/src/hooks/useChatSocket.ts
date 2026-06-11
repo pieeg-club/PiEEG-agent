@@ -2,6 +2,14 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { openSocket, type SocketHandle } from "../socket";
 import type { ChatWireEvent } from "../types";
 import type { useLogsCapture } from "./useLogsCapture";
+import {
+  saveConversation,
+  loadConversation,
+  generateConversationId,
+  getCurrentConversationId,
+  setCurrentConversationId,
+  clearCurrentConversationId,
+} from "../util/conversations";
 
 export type ToolPart = {
   kind: "tool";
@@ -27,8 +35,20 @@ export interface ChatMessage {
 // tool_start / tool_result / done events onto the in-progress assistant turn,
 // and serialises sends behind a `busy` flag (the backend handles one turn at a
 // time). Tool calls render inline as chips, ChatGPT/Gemini style.
+// Now includes conversation persistence to localStorage.
 export function useChatSocket(logs?: ReturnType<typeof useLogsCapture>) {
+  const [conversationId, setConversationId] = useState<string>(() => {
+    return getCurrentConversationId() || generateConversationId();
+  });
+  
   const [messages, setMessages] = useState<ChatMessage[]>(() => {
+    // Try loading from saved conversation
+    const savedId = getCurrentConversationId();
+    if (savedId) {
+      const conv = loadConversation(savedId);
+      if (conv) return conv.messages;
+    }
+    // Fallback to sessionStorage for migration
     try {
       const saved = sessionStorage.getItem("pieeg-chat-history");
       return saved ? JSON.parse(saved) : [];
@@ -36,6 +56,7 @@ export function useChatSocket(logs?: ReturnType<typeof useLogsCapture>) {
       return [];
     }
   });
+  
   const [connected, setConnected] = useState(false);
   const [busy, setBusyState] = useState(false);
 
@@ -54,14 +75,23 @@ export function useChatSocket(logs?: ReturnType<typeof useLogsCapture>) {
     setBusyState(v);
   };
 
-  // Persist chat history to sessionStorage
+  // Auto-save conversation to localStorage when messages change
   useEffect(() => {
+    if (messages.length > 0) {
+      saveConversation(conversationId, messages);
+    }
+    // Also keep sessionStorage for backwards compat
     try {
       sessionStorage.setItem("pieeg-chat-history", JSON.stringify(messages));
     } catch {
       // Ignore quota errors
     }
-  }, [messages]);
+  }, [messages, conversationId]);
+
+  // Track current conversation ID
+  useEffect(() => {
+    setCurrentConversationId(conversationId);
+  }, [conversationId]);
 
   // Apply a mutation to the current (last) assistant message.
   const mutateLast = useCallback(
@@ -195,5 +225,36 @@ export function useChatSocket(logs?: ReturnType<typeof useLogsCapture>) {
     }
   }, []);
 
-  return { messages, connected, busy, send, reset };
+  const loadConv = useCallback((id: string) => {
+    const conv = loadConversation(id);
+    if (conv) {
+      setConversationId(id);
+      setMessages(conv.messages);
+      // Reset agent context when switching conversations
+      sockRef.current?.send({ reset: true });
+      setBusy(false);
+    }
+  }, []);
+
+  const newConversation = useCallback(() => {
+    const newId = generateConversationId();
+    setConversationId(newId);
+    setMessages([]);
+    // Reset agent context
+    sockRef.current?.send({ reset: true });
+    setBusy(false);
+    clearCurrentConversationId();
+    setCurrentConversationId(newId);
+  }, []);
+
+  return { 
+    messages, 
+    connected, 
+    busy, 
+    send, 
+    reset, 
+    conversationId,
+    loadConversation: loadConv,
+    newConversation,
+  };
 }

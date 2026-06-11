@@ -3,6 +3,7 @@ import { api } from "./api";
 import { Chat } from "./components/Chat";
 import { ArtifactFeed, BandBars, QualityGrid, StateCard } from "./components/BrainCards";
 import { ConnectivityCard } from "./components/ConnectivityCard";
+import { ConversationList } from "./components/ConversationList";
 import { Header } from "./components/Header";
 import { LLMSettings } from "./components/LLMSettings";
 import { LogsPanel } from "./components/LogsPanel";
@@ -28,6 +29,7 @@ export default function App() {
   const [showSettings, setShowSettings] = useState(false);
   const [showSystem, setShowSystem] = useState(false);
   const [showLogs, setShowLogs] = useState(false);
+  const [showHistory, setShowHistory] = useState(false);
   const [explain, setExplain] = useState<{ name: string; data: PatternExplain | null } | null>(null);
 
   useEffect(() => {
@@ -70,6 +72,7 @@ export default function App() {
           connected={chat.connected}
           onSend={chat.send}
           onReset={chat.reset}
+          onHistory={() => setShowHistory(true)}
         />
         <aside className="brain">
           <StateCard state={snapshot?.state} />
@@ -92,6 +95,14 @@ export default function App() {
       )}
       {showSettings && <LLMSettings info={info} onClose={() => setShowSettings(false)} />}
       {showSystem && <SystemControl onClose={() => setShowSystem(false)} />}
+      {showHistory && (
+        <ConversationList
+          currentId={chat.conversationId}
+          onSelect={chat.loadConversation}
+          onNew={chat.newConversation}
+          onClose={() => setShowHistory(false)}
+        />
+      )}
       {showLogs && (
         <LogsPanel
           logs={logs.logs}
