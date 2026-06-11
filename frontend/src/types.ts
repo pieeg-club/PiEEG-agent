@@ -127,6 +127,14 @@ export interface Connectivity {
   matrix?: number[][];
 }
 
+export interface CascadeStats {
+  ticks: number;        // total processing cycles @ feature_hz
+  features: number;     // successful feature extractions
+  states: number;       // emitted NeuralState count @ state_hz
+  events: number;       // debounced events in the log
+  last_summary: string; // latest state summary text
+}
+
 export interface Snapshot {
   state: NeuralState;
   bands: Bands;
@@ -135,6 +143,7 @@ export interface Snapshot {
   artifacts: Artifacts;
   patterns: Patterns;
   connectivity: Connectivity;
+  cascade: CascadeStats;
 }
 
 export interface PatternMeta {

@@ -75,6 +75,16 @@ class FakeCascade:
     def channel_labels(self):
         return ["Ch0", "Ch1", "Ch2", "Ch3"]
 
+    def stats(self):
+        summary = self._state.summary() if self._state else ""
+        return {
+            "ticks": 1234,
+            "features": 153,
+            "states": 19,
+            "events": len(self._events),
+            "last_summary": summary,
+        }
+
 
 def test_specs_cover_all_tools():
     tools = NeuralTools(FakeCascade())
@@ -85,6 +95,7 @@ def test_specs_cover_all_tools():
         "get_recent_events",
         "get_channel_quality",
         "summarize_last",
+        "get_cascade_stats",
     }
     # Every spec advertises an object schema (providers require it).
     for spec in tools.specs():
@@ -154,3 +165,18 @@ def test_summarize_last_returns_one_liner():
     out = tools.call("summarize_last")
     assert "focus" in out["summary"]
     assert out["warming_up"] is False
+
+
+def test_get_cascade_stats_returns_processing_counts():
+    events = [
+        NeuralEvent(timestamp=float(i), type="focus_high", value=0.8,
+                    detail="focus rose", severity="info")
+        for i in range(3)
+    ]
+    tools = NeuralTools(FakeCascade(state=mk_state(), events=events))
+    out = tools.call("get_cascade_stats")
+    assert out["ticks"] == 1234
+    assert out["features"] == 153
+    assert out["states"] == 19
+    assert out["events"] == 3
+    assert "focus" in out["last_summary"]

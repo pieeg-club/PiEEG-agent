@@ -96,6 +96,7 @@ class WebEngine:
             "artifacts": self._decode.call("find_artifacts", {"limit": 8}),
             "patterns": self._decode.call("detect_patterns", {}),
             "connectivity": self._decode.call("connectivity", {"seconds": 8.0}),
+            "cascade": self._senses.call("get_cascade_stats", {}),
         }
 
     # ── chat ─────────────────────────────────────────────────────────────

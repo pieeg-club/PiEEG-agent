@@ -163,6 +163,14 @@ class NeuralTools:
             ),
             self._summarize_last,
         ))
+        self._add(Tool(
+            _spec(
+                "get_cascade_stats",
+                "Internal cascade processing stats: tick counts, feature/state "
+                "emission rates, and last event summary. For debugging pipeline health.",
+            ),
+            self._get_cascade_stats,
+        ))
 
     # ── handlers (pull from the cascade) ─────────────────────────────────
     def _get_neural_state(self, _args: dict) -> dict:
@@ -234,6 +242,9 @@ class NeuralTools:
             "summary": state.summary(),
             "warming_up": state.warming_up,
         }
+
+    def _get_cascade_stats(self, _args: dict) -> dict:
+        return self._cascade.stats()
 
 
 # ── helpers ─────────────────────────────────────────────────────────────────

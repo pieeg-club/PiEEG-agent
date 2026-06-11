@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { api } from "./api";
 import { Chat } from "./components/Chat";
 import { ArtifactFeed, BandBars, QualityGrid, StateCard } from "./components/BrainCards";
+import { CascadeMonitor } from "./components/CascadeMonitor";
 import { ConnectivityCard } from "./components/ConnectivityCard";
 import { ConversationList } from "./components/ConversationList";
 import { Header } from "./components/Header";
@@ -79,6 +80,11 @@ export default function App() {
           <BandBars bands={snapshot?.bands} />
           <QualityGrid quality={snapshot?.quality} />
           <ConnectivityCard conn={snapshot?.connectivity || {}} />
+          <CascadeMonitor
+            cascade={snapshot?.cascade}
+            state={snapshot?.state}
+            events={snapshot?.events}
+          />
           <PatternTicker
             patterns={snapshot?.patterns}
             onTrain={() => setTraining(true)}
