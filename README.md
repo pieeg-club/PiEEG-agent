@@ -48,9 +48,20 @@ Get yours from:
 
 Enter your Anthropic API key: ********
 ✓ API key received
+
+💾 Save Configuration
+Would you like to save these settings?
+  Location: ~/.pieeg-agent/config.json
+  ⚠️  API key will be stored in plaintext (file permissions: 0600)
+
+Save configuration? [Y/n]: y
+✓ Configuration saved
 ```
 
-The wizard sets environment variables for your session — **no files are written**. To persist configuration, set the env vars in your shell profile or use `.env` files.
+**Configuration persists**: Once saved, your provider and API key are automatically loaded on subsequent runs. You won't be prompted again unless:
+- The saved config is invalid or missing
+- You explicitly reset it with `pieeg-agent config reset`
+- You override with environment variables or CLI flags
 
 ---
 
@@ -351,9 +362,20 @@ When you run a command that needs an LLM provider (`web`, `chat`, `ask`) without
 
 1. **Provider selection** — Choose from 7 providers (cloud or local)
 2. **API key input** — Secure prompt (hidden input) for cloud providers
-3. **Automatic env var setup** — Sets variables for your session
+3. **Save configuration** — Option to persist settings to `~/.pieeg-agent/config.json`
 
-The wizard only runs in interactive terminals (when `stdin.isatty()` is true). For non-interactive environments (CI, Docker, systemd), set environment variables directly.
+Saved configuration is automatically loaded on subsequent runs. The wizard only appears when:
+- No saved config exists
+- No environment variables are set
+- Running in an interactive terminal (`stdin.isatty()` is true)
+
+**Manage saved configuration:**
+```bash
+pieeg-agent config          # view current config + saved settings
+pieeg-agent config reset    # delete saved config (will prompt again)
+```
+
+For non-interactive environments (CI, Docker, systemd), set environment variables directly — the wizard won't run.
 
 ### Environment Variables
 

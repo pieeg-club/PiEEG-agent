@@ -22,6 +22,7 @@ for the copilot, cooldown-limited and audited.
 from __future__ import annotations
 
 import argparse
+import json
 import logging
 import os
 import sys
@@ -31,6 +32,50 @@ from pathlib import Path
 
 from . import __version__
 from .config import PROVIDERS, AgentConfig
+
+
+def _config_file_path() -> Path:
+    """Return the path to the user's config file."""
+    return Path.home() / ".pieeg-agent" / "config.json"
+
+
+def _load_saved_config() -> dict | None:
+    """Load saved provider configuration from disk if it exists."""
+    config_path = _config_file_path()
+    if not config_path.exists():
+        return None
+    
+    try:
+        with open(config_path, "r") as f:
+            return json.load(f)
+    except (json.JSONDecodeError, IOError):
+        return None
+
+
+def _save_config(provider: str, api_key: str) -> bool:
+    """Save provider configuration to disk.
+    
+    Returns True if saved successfully, False otherwise.
+    """
+    config_path = _config_file_path()
+    config_path.parent.mkdir(parents=True, exist_ok=True)
+    
+    try:
+        data = {
+            "provider": provider,
+            "api_key": api_key,
+            "version": 1,
+        }
+        with open(config_path, "w") as f:
+            json.dump(data, f, indent=2)
+        
+        # Set restrictive permissions (owner read/write only)
+        if hasattr(os, "chmod"):
+            os.chmod(config_path, 0o600)
+        
+        return True
+    except (IOError, OSError):
+        return False
 
 
 def _interactive_llm_setup() -> tuple[str, str]:
@@ -107,6 +152,23 @@ def _interactive_llm_setup() -> tuple[str, str]:
     else:
         api_key = ""
         print("✓ No API key needed (local provider)")
+    
+    # Offer to save configuration
+    print("\n💾 Save Configuration")
+    print("Would you like to save these settings?")
+    print(f"  Location: {_config_file_path()}")
+    if api_key:
+        print("  ⚠️  API key will be stored in plaintext (file permissions: 0600)")
+    print()
+    
+    save = input("Save configuration? [Y/n]: ").strip().lower()
+    if save in ("", "y", "yes"):
+        if _save_config(provider_key, api_key):
+            print(f"✓ Configuration saved")
+        else:
+            print("⚠️  Failed to save configuration (will prompt again next time)")
+    else:
+        print("Configuration not saved (will prompt again next time)")
     
     print("\n" + "=" * 50)
     print("Setup complete! Starting agent...\n")
@@ -379,7 +441,23 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Maximum entries to show (default 20).",
     )
 
-    sub.add_parser("config", help="Print the resolved configuration.")
+    # ── config: show/reset saved configuration ──────────────────────────
+    p_config = sub.add_parser(
+        "config", 
+        help="Print the resolved configuration or manage saved settings."
+    )
+    cfg_sub = p_config.add_subparsers(dest="config_cmd")
+    
+    cfg_sub.add_parser(
+        "show", 
+        help="Print the resolved configuration (default)."
+    )
+    
+    cfg_sub.add_parser(
+        "reset",
+        help="Delete saved provider configuration (will prompt again on next run)."
+    )
+    
     return parser
 
 
@@ -497,6 +575,26 @@ def cmd_ingest(args) -> int:
 
 
 def cmd_config(args) -> int:
+    """Show or reset saved configuration."""
+    config_cmd = getattr(args, "config_cmd", None)
+    
+    # Reset subcommand - delete saved config
+    if config_cmd == "reset":
+        config_path = _config_file_path()
+        if config_path.exists():
+            try:
+                config_path.unlink()
+                print(f"✓ Deleted saved configuration: {config_path}")
+                print("You will be prompted for provider setup on the next run.")
+                return 0
+            except (IOError, OSError) as e:
+                print(f"❌ Failed to delete configuration: {e}", file=sys.stderr)
+                return 1
+        else:
+            print(f"No saved configuration found at: {config_path}")
+            return 0
+    
+    # Show subcommand (or default if no subcommand given)
     cfg = AgentConfig.from_env()
     print("Resolved configuration:\n")
     print(f"  LSL stream      : {cfg.lsl_resolve_by}={cfg.lsl_name!r}/{cfg.lsl_type!r}")
@@ -506,6 +604,16 @@ def cmd_config(args) -> int:
     print(f"  API key present : {cfg.has_api_key}")
     print(f"  Server WS       : {cfg.ws_url}")
     print(f"  Known providers : {', '.join(sorted(PROVIDERS))}")
+    
+    # Show saved config info
+    saved_config = _load_saved_config()
+    if saved_config:
+        saved_provider = saved_config.get("provider", "unknown")
+        config_path = _config_file_path()
+        print(f"\n  Saved config    : {config_path}")
+        print(f"  Saved provider  : {saved_provider}")
+        print("  (Use 'pieeg-agent config reset' to delete)")
+    
     problems = cfg.validate()
     if problems:
         print("\n  Notes:")
@@ -707,44 +815,84 @@ def _start_copilot(args):
 
     # Fail fast on LLM config *before* touching hardware, so the user isn't
     # told to plug in a headset only to hit a missing-key error afterwards.
-    # If provider is not configured, prompt interactively.
+    # If provider is not configured, check saved config or prompt interactively.
     provider = None
     try:
         provider = get_provider(cfg)
     except ProviderError as exc:
-        # Check if this is a missing API key error and if we're in an interactive terminal
-        if sys.stdin.isatty() and "API key" in str(exc):
-            # Interactive setup
-            provider_name, api_key = _interactive_llm_setup()
+        # Check if this is a missing API key error
+        if "API key" in str(exc):
+            # First, try to load saved configuration
+            saved_config = _load_saved_config()
             
-            # Set environment variables for this session
-            if api_key:
+            if saved_config and saved_config.get("provider") and saved_config.get("api_key"):
+                # Use saved config
+                provider_name = saved_config["provider"]
+                api_key = saved_config["api_key"]
+                
+                print(f"📋 Using saved configuration: {PROVIDERS.get(provider_name, {}).get('label', provider_name)}")
+                
+                # Set environment variable for this session
                 spec = PROVIDERS.get(provider_name, {})
                 env_key = spec.get("env_key", "")
-                if env_key:
+                if env_key and api_key:
                     os.environ[env_key] = api_key
-            
-            # Rebuild config with the selected provider
-            cfg = AgentConfig.from_env(
-                lsl_name=args.name,
-                lsl_type=args.stype,
-                lsl_resolve_by=args.by,
-                provider=provider_name,
-                model=args.model,
-                ring_seconds=args.ring_seconds,
-            )
-            
-            # Retry provider creation
-            try:
-                provider = get_provider(cfg)
-            except ProviderError as retry_exc:
-                print(f"LLM provider setup failed: {retry_exc}", file=sys.stderr)
+                
+                # Rebuild config with the saved provider
+                cfg = AgentConfig.from_env(
+                    lsl_name=args.name,
+                    lsl_type=args.stype,
+                    lsl_resolve_by=args.by,
+                    provider=provider_name,
+                    model=args.model,
+                    ring_seconds=args.ring_seconds,
+                )
+                
+                # Retry provider creation
+                try:
+                    provider = get_provider(cfg)
+                except ProviderError as retry_exc:
+                    print(f"⚠️  Saved configuration is invalid: {retry_exc}", file=sys.stderr)
+                    print("Please reconfigure or delete:", _config_file_path(), file=sys.stderr)
+                    return None
+                    
+            elif sys.stdin.isatty():
+                # No saved config and interactive terminal - prompt user
+                provider_name, api_key = _interactive_llm_setup()
+                
+                # Set environment variables for this session
+                if api_key:
+                    spec = PROVIDERS.get(provider_name, {})
+                    env_key = spec.get("env_key", "")
+                    if env_key:
+                        os.environ[env_key] = api_key
+                
+                # Rebuild config with the selected provider
+                cfg = AgentConfig.from_env(
+                    lsl_name=args.name,
+                    lsl_type=args.stype,
+                    lsl_resolve_by=args.by,
+                    provider=provider_name,
+                    model=args.model,
+                    ring_seconds=args.ring_seconds,
+                )
+                
+                # Retry provider creation
+                try:
+                    provider = get_provider(cfg)
+                except ProviderError as retry_exc:
+                    print(f"LLM provider setup failed: {retry_exc}", file=sys.stderr)
+                    return None
+            else:
+                # Non-interactive - fail with original message
+                print(f"LLM provider not ready: {exc}", file=sys.stderr)
+                print("\nTip: Run this command interactively to configure the provider,", file=sys.stderr)
+                print(f"     or set the required environment variables, or save config to:", file=sys.stderr)
+                print(f"     {_config_file_path()}", file=sys.stderr)
                 return None
         else:
-            # Non-interactive or different error - fail with original message
+            # Different error - fail with original message
             print(f"LLM provider not ready: {exc}", file=sys.stderr)
-            print("\nTip: Run this command interactively to configure the provider,", file=sys.stderr)
-            print("     or set the required environment variables.", file=sys.stderr)
             return None
 
     # Optionally bring up the gated actuator side (also before hardware, so a
@@ -795,15 +943,10 @@ def _start_copilot(args):
         tools = CombinedToolset(senses, decode, actuator)
         copilot = Copilot(provider, tools, system=ACTUATOR_SYSTEM_PROMPT)
         # Build actions for direct web control (reuses the same client/gate)
-        from .server import ActionGate, ActionPolicy, AuditLog, ServerActions
-        audit_path = (
-            None if getattr(args, "no_audit_log", False) else
-            _audit_log_path(args)
-        )
+        from .server import ActionGate, ActionPolicy, ServerActions
         gate = ActionGate(
-            policy=ActionPolicy(allowed=SAFE_ACTIONS),
-            audit=AuditLog(audit_path),
-            dry_run=not getattr(args, "execute", False),
+            policy=ActionPolicy.allow(*SAFE_ACTIONS, dry_run=not getattr(args, "execute", False)),
+            audit=_audit_log(args),
         )
         actions = ServerActions(client, gate)
     else:
