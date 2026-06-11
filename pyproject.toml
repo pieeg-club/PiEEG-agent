@@ -28,6 +28,8 @@ classifiers = [
 dependencies = [
     "numpy>=1.24",
     "pylsl>=1.16",
+    "nbformat>=5.9",
+    "nbconvert>=7.0",
 ]
 
 [project.optional-dependencies]

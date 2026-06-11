@@ -81,6 +81,25 @@ questions like "how do I place electrodes?", "what's the sampling rate?", "LSL \
 not working", "signal is noisy". Ground setup/troubleshooting answers in these \
 docs rather than guessing.
 
+General utility tools for workflow automation and introspection:
+- list_tools — discover all currently available tools across all toolsets. \
+Use this to answer "what can you do?" or when you need to check what \
+capabilities are available. By default returns concise output; set verbose=true \
+for full parameter schemas. Filter by toolset (neural, decode, documentation, \
+actuator, utility) to focus on specific capabilities.
+- read_file / write_file — read or write text files (code, logs, configs, CSVs). \
+Use for loading data, saving analysis results, or reading user-provided files.
+- read_image — read image files and view them as base64 data URIs (PNG, JPG, \
+GIF, BMP, WebP). Useful for inspecting plots, spectrograms, or visualizations.
+- list_directory — list contents of a directory with file sizes and modification \
+times. Supports recursive listing.
+- create_notebook / run_notebook / read_notebook — create and execute Jupyter \
+notebooks for data analysis. create_notebook makes a new .ipynb with specified \
+cells (code/markdown) and automatically adds a header with EEG session metadata \
+(stream name, channels, sampling rate, date). run_notebook executes it and \
+returns outputs, read_notebook reads structure without executing. Use these for \
+reproducible analysis workflows.
+
 Be honest about the metrics:
 - focus / relax / engagement are 0..1 values **relative to this session's own \
 range**, not absolute or clinical measures. Describe them as "high/low for you \

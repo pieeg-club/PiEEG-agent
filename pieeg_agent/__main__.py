@@ -801,6 +801,7 @@ def _start_copilot(args):
         DecodeTools,
         DocumentationTools,
         NeuralTools,
+        UtilityTools,
     )
     from .llm import ProviderError, get_provider
     from .perceive import CascadeConfig, PerceptionCascade
@@ -929,6 +930,19 @@ def _start_copilot(args):
     senses = NeuralTools(cascade)
     decode = DecodeTools(cascade)
     docs = DocumentationTools()
+    # Build session metadata for notebook headers
+    session_metadata = {
+        "stream_name": inlet.stream_name,
+        "channels": {
+            "count": inlet.num_channels,
+            "labels": cascade.channel_labels(),
+        },
+        "sample_rate": inlet.sample_rate,
+        "mains_hz": args.mains,
+        "provider": f"{cfg.provider}:{cfg.model}",
+    }
+    # Create utility tools with session metadata
+    utility = UtilityTools(session_metadata=session_metadata)
     # Drive the live pattern bank (and any in-progress training capture) from
     # every cascade frame. Wired here because cascade and decoder reference
     # each other.
@@ -942,7 +956,9 @@ def _start_copilot(args):
         _wait_for_state(cascade, args.warmup)
 
     if actuator is not None:
-        tools = CombinedToolset(senses, decode, docs, actuator)
+        # Update utility with all toolsets for complete discovery
+        utility = UtilityTools([senses, decode, docs, actuator, utility], session_metadata)
+        tools = CombinedToolset(senses, decode, docs, actuator, utility)
         copilot = Copilot(provider, tools, system=ACTUATOR_SYSTEM_PROMPT)
         # Build actions for direct web control (reuses the same client/gate)
         from .server import ActionGate, ActionPolicy, ServerActions
@@ -952,7 +968,9 @@ def _start_copilot(args):
         )
         actions = ServerActions(client, gate)
     else:
-        tools = CombinedToolset(senses, decode, docs)
+        # Update utility with all toolsets for complete discovery
+        utility = UtilityTools([senses, decode, docs, utility], session_metadata)
+        tools = CombinedToolset(senses, decode, docs, utility)
         copilot = Copilot(provider, tools, system=SYSTEM_PROMPT)
         actions = None
     return _CopilotSession(
