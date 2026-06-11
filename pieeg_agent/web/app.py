@@ -31,7 +31,7 @@ from ..llm._http import LLMHTTPError
 _SENTINEL = object()
 
 
-def _safe_next(it):
+def _safe_next(it) -> object:
     try:
         return next(it)
     except StopIteration:

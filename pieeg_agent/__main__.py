@@ -29,6 +29,7 @@ import sys
 import time
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any, Callable
 
 from . import __version__
 from .config import PROVIDERS, AgentConfig
@@ -734,7 +735,7 @@ def cmd_monitor(args) -> int:
     return 0 if st["states"] > 0 else 1
 
 
-def _connect_eeg_inlet(cfg):
+def _connect_eeg_inlet(cfg) -> Any:
     """Resolve (by name) or discover+smart-pick (by type) the EEG inlet.
 
     Shared by ``monitor``, ``ask`` and ``chat``. Returns a connected, *not yet
@@ -782,7 +783,7 @@ class _CopilotSession:
     actions: object = None  # ServerActions when --allow-actions is set
 
 
-def _start_copilot(args):
+def _start_copilot(args) -> _CopilotSession | None:
     """Bring up inlet + cascade + copilot for the ``ask`` / ``chat`` / ``web``
     commands.
 
@@ -985,7 +986,7 @@ def _start_copilot(args):
     )
 
 
-def _build_actuator(args, cfg, safe_actions):
+def _build_actuator(args, cfg, safe_actions) -> tuple[Any, Any]:
     """Connect the control plane and build gated actuator tools.
 
     Returns ``(ActuatorTools, ServerControlClient)`` or ``(None, None)`` after
@@ -1026,7 +1027,7 @@ def _build_actuator(args, cfg, safe_actions):
     return ActuatorTools(actions), client
 
 
-def _control_token(args):
+def _control_token(args) -> str | None:
     return args.token or os.environ.get("PIEEG_WS_TOKEN")
 
 
@@ -1045,7 +1046,7 @@ def _audit_log_path(args) -> str | None:
     )
 
 
-def _audit_log(args):
+def _audit_log(args) -> Any:
     """Build an :class:`AuditLog`, persisting to JSONL unless disabled.
 
     Creates the parent directory if needed; falls back to an in-memory log if
@@ -1280,7 +1281,7 @@ def cmd_control(args) -> int:
     return 0
 
 
-def _resolve_control(args):
+def _resolve_control(args) -> tuple[str | None, Callable[[Any], Any] | None]:
     """Map a control subcommand to ``(action_name, fn)``.
 
     ``action_name`` is ``None`` for read-only commands (no gating); otherwise
