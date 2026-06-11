@@ -9,6 +9,7 @@ build/
 # Frontend build artifacts (node_modules ignored, but dist committed)
 frontend/node_modules/
 frontend/.vite/
+*.tsbuildinfo
 
 # Virtual environments
 .venv/
