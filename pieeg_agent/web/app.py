@@ -25,6 +25,7 @@ from fastapi.staticfiles import StaticFiles
 from starlette.concurrency import run_in_threadpool
 
 from .engine import WebEngine
+from ..llm._http import LLMHTTPError
 
 # Sentinel marking a drained sync generator pulled through the threadpool.
 _SENTINEL = object()
@@ -35,6 +36,25 @@ def _safe_next(it):
         return next(it)
     except StopIteration:
         return _SENTINEL
+
+
+def _format_llm_error(exc: Exception) -> str:
+    """Format an LLM error into a user-friendly message."""
+    if isinstance(exc, LLMHTTPError):
+        if exc.status == 429:
+            return (
+                "Rate limit exceeded. The API is receiving too many requests. "
+                "Please wait a moment and try again."
+            )
+        elif exc.status == 401:
+            return "Authentication failed. Please check your API key."
+        elif exc.status == 400:
+            return f"Bad request: {exc}"
+        elif exc.status >= 500:
+            return "The LLM service is experiencing issues. Please try again later."
+        else:
+            return f"LLM error: {exc}"
+    return f"Unexpected error: {exc}"
 
 
 def create_app(
@@ -221,8 +241,16 @@ def create_app(
                         {"type": "error", "detail": "empty message"}
                     )
                     continue
-                async for event in _aiter_in_threadpool(engine.chat_stream(text)):
-                    await ws.send_json(event)
+                try:
+                    async for event in _aiter_in_threadpool(engine.chat_stream(text)):
+                        await ws.send_json(event)
+                except Exception as exc:
+                    # Handle LLM errors gracefully without crashing the websocket
+                    error_msg = _format_llm_error(exc)
+                    await ws.send_json({
+                        "type": "error",
+                        "detail": error_msg
+                    })
         except WebSocketDisconnect:
             return
 

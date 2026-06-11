@@ -13,6 +13,7 @@ errors normalised to :class:`LLMHTTPError` so callers needn't know about
 from __future__ import annotations
 
 import json
+import time
 import urllib.error
 import urllib.request
 from typing import Iterator
@@ -38,12 +39,17 @@ def post_json(
     headers: dict[str, str],
     *,
     timeout: float = 60.0,
+    max_retries: int = 3,
+    retry_delay: float = 1.0,
 ) -> dict:
     """POST ``payload`` as JSON and return the decoded JSON response.
 
     Raises :class:`LLMHTTPError` on non-2xx responses or transport failures,
     surfacing the provider's error body so the caller can show something
     actionable (bad key, unknown model, rate limit, …).
+    
+    Rate limits (HTTP 429) are retried with exponential backoff up to
+    ``max_retries`` times. Other errors fail immediately.
     """
     body = json.dumps(payload).encode("utf-8")
     req = urllib.request.Request(url, data=body, method="POST")
@@ -51,20 +57,31 @@ def post_json(
     for key, value in headers.items():
         req.add_header(key, value)
 
-    try:
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
-            raw = resp.read().decode("utf-8")
-    except urllib.error.HTTPError as exc:  # 4xx / 5xx with a body
-        detail = _read_error_body(exc)
-        raise LLMHTTPError(
-            f"HTTP {exc.code} from {url}: {_short(detail)}",
-            status=exc.code,
-            body=detail,
-        ) from exc
-    except urllib.error.URLError as exc:  # DNS, refused, timeout, TLS, …
-        raise LLMHTTPError(
-            f"Could not reach {url}: {exc.reason}", status=0
-        ) from exc
+    last_error = None
+    for attempt in range(max_retries + 1):
+        try:
+            with urllib.request.urlopen(req, timeout=timeout) as resp:
+                raw = resp.read().decode("utf-8")
+            # Success - break out of retry loop
+            break
+        except urllib.error.HTTPError as exc:  # 4xx / 5xx with a body
+            detail = _read_error_body(exc)
+            last_error = LLMHTTPError(
+                f"HTTP {exc.code} from {url}: {_short(detail)}",
+                status=exc.code,
+                body=detail,
+            )
+            # Retry only on 429 (rate limit) or 503 (service unavailable)
+            if exc.code in (429, 503) and attempt < max_retries:
+                # Exponential backoff: 1s, 2s, 4s, ...
+                delay = retry_delay * (2 ** attempt)
+                time.sleep(delay)
+                continue
+            raise last_error from exc
+        except urllib.error.URLError as exc:  # DNS, refused, timeout, TLS, …
+            raise LLMHTTPError(
+                f"Could not reach {url}: {exc.reason}", status=0
+            ) from exc
 
     try:
         return json.loads(raw)
@@ -87,6 +104,8 @@ def post_sse(
     headers: dict[str, str],
     *,
     timeout: float = 60.0,
+    max_retries: int = 3,
+    retry_delay: float = 1.0,
 ) -> Iterator[dict]:
     """POST ``payload`` and yield each server-sent ``data:`` event as a dict.
 
@@ -97,6 +116,9 @@ def post_sse(
 
     Errors are normalised to :class:`LLMHTTPError`, matching :func:`post_json`,
     so streaming and blocking callers handle failures the same way.
+    
+    Rate limits (HTTP 429) are retried with exponential backoff up to
+    ``max_retries`` times. Other errors fail immediately.
     """
     body = json.dumps(payload).encode("utf-8")
     req = urllib.request.Request(url, data=body, method="POST")
@@ -105,19 +127,30 @@ def post_sse(
     for key, value in headers.items():
         req.add_header(key, value)
 
-    try:
-        resp = urllib.request.urlopen(req, timeout=timeout)
-    except urllib.error.HTTPError as exc:  # 4xx / 5xx with a body
-        detail = _read_error_body(exc)
-        raise LLMHTTPError(
-            f"HTTP {exc.code} from {url}: {_short(detail)}",
-            status=exc.code,
-            body=detail,
-        ) from exc
-    except urllib.error.URLError as exc:  # DNS, refused, timeout, TLS, …
-        raise LLMHTTPError(
-            f"Could not reach {url}: {exc.reason}", status=0
-        ) from exc
+    last_error = None
+    for attempt in range(max_retries + 1):
+        try:
+            resp = urllib.request.urlopen(req, timeout=timeout)
+            # Success - break out of retry loop
+            break
+        except urllib.error.HTTPError as exc:  # 4xx / 5xx with a body
+            detail = _read_error_body(exc)
+            last_error = LLMHTTPError(
+                f"HTTP {exc.code} from {url}: {_short(detail)}",
+                status=exc.code,
+                body=detail,
+            )
+            # Retry only on 429 (rate limit) or 503 (service unavailable)
+            if exc.code in (429, 503) and attempt < max_retries:
+                # Exponential backoff: 1s, 2s, 4s, ...
+                delay = retry_delay * (2 ** attempt)
+                time.sleep(delay)
+                continue
+            raise last_error from exc
+        except urllib.error.URLError as exc:  # DNS, refused, timeout, TLS, …
+            raise LLMHTTPError(
+                f"Could not reach {url}: {exc.reason}", status=0
+            ) from exc
 
     with resp:
         for raw_line in resp:
