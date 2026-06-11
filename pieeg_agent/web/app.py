@@ -108,6 +108,64 @@ def create_app(
         status = 404 if "error" in result else 200
         return JSONResponse(result, status_code=status)
 
+    # ── LSL streams discovery ─────────────────────────────────────────────
+    @app.get("/api/streams")
+    async def streams(wait: float = 2.0) -> dict:
+        """Discover LSL streams on the network."""
+        return await run_in_threadpool(engine.list_streams, wait)
+
+    # ── server control ────────────────────────────────────────────────────
+    @app.get("/api/server/status")
+    async def server_status() -> dict:
+        """Get PiEEG-server status if connected."""
+        return await run_in_threadpool(engine.server_status)
+
+    @app.post("/api/server/filter")
+    async def server_filter(request: Request) -> dict:
+        """Set server-side band-pass filter."""
+        data = await request.json()
+        return await run_in_threadpool(
+            engine.server_filter,
+            data.get("enabled", True),
+            data.get("lowcut", 1.0),
+            data.get("highcut", 40.0),
+        )
+
+    @app.post("/api/server/record")
+    async def server_record(request: Request) -> dict:
+        """Start or stop server-side recording."""
+        data = await request.json()
+        action = data.get("action", "start")
+        return await run_in_threadpool(engine.server_record, action)
+
+    @app.post("/api/server/osc")
+    async def server_osc(request: Request) -> dict:
+        """Start or stop OSC output."""
+        data = await request.json()
+        action = data.get("action", "start")
+        config = data.get("config")
+        return await run_in_threadpool(engine.server_osc, action, config)
+
+    @app.post("/api/server/lsl")
+    async def server_lsl(request: Request) -> dict:
+        """Start or stop LSL output."""
+        data = await request.json()
+        action = data.get("action", "start")
+        config = data.get("config")
+        return await run_in_threadpool(engine.server_lsl, action, config)
+
+    @app.post("/api/server/register-preset")
+    async def server_register_preset(request: Request) -> dict:
+        """Apply an ADS1299 register preset."""
+        data = await request.json()
+        preset = data.get("preset", "normal")
+        return await run_in_threadpool(engine.server_register_preset, preset)
+
+    @app.get("/api/server/webhooks")
+    async def server_webhooks() -> dict:
+        """List server webhook rules."""
+        return await run_in_threadpool(engine.server_webhooks)
+
     @app.post("/api/llm/config")
     async def update_llm_config(request: Request) -> dict:
         """Update LLM configuration (runtime only, not persisted)."""

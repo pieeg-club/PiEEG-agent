@@ -66,11 +66,13 @@ class WebEngine:
         senses: _Toolset,
         decode: _Toolset,
         info: dict | None = None,
+        actions: Any | None = None,
     ):
         self._copilot = copilot
         self._senses = senses
         self._decode = decode
         self._info = dict(info or {})
+        self._actions = actions
         self._chat_lock = threading.Lock()
 
     # ── metadata ─────────────────────────────────────────────────────────
@@ -144,3 +146,108 @@ class WebEngine:
 
     def train_cancel(self) -> dict:
         return self._decode.call("cancel_pattern_training", {})
+
+    # ── LSL streams discovery ────────────────────────────────────────────
+    def list_streams(self, wait: float = 2.0) -> dict:
+        """Discover LSL streams on the network (threadsafe)."""
+        try:
+            from pylsl import resolve_streams
+        except Exception as exc:
+            return {"error": f"pylsl unavailable: {exc}"}
+        try:
+            streams = resolve_streams(wait)
+            return {
+                "streams": [
+                    {
+                        "name": s.name(),
+                        "type": s.type(),
+                        "channels": s.channel_count(),
+                        "rate": s.nominal_srate(),
+                        "source_id": s.source_id(),
+                    }
+                    for s in streams
+                ],
+            }
+        except Exception as exc:
+            return {"error": str(exc)}
+
+    # ── server control (if available) ────────────────────────────────────
+    def server_status(self) -> dict:
+        """Get PiEEG-server status if actions are available."""
+        if not hasattr(self, "_actions") or self._actions is None:
+            return {"error": "Server control not enabled (use --allow-actions)"}
+        try:
+            return self._actions.server_info()
+        except Exception as exc:
+            return {"error": str(exc)}
+
+    def server_filter(self, enabled: bool, lowcut: float, highcut: float) -> dict:
+        """Set server-side band-pass filter."""
+        if not hasattr(self, "_actions") or self._actions is None:
+            return {"error": "Server control not enabled"}
+        try:
+            return self._actions.set_filter(
+                enabled=enabled, lowcut=lowcut, highcut=highcut
+            )
+        except Exception as exc:
+            return {"error": str(exc)}
+
+    def server_record(self, action: str) -> dict:
+        """Start or stop server-side recording."""
+        if not hasattr(self, "_actions") or self._actions is None:
+            return {"error": "Server control not enabled"}
+        try:
+            if action == "start":
+                return self._actions.start_recording()
+            elif action == "stop":
+                return self._actions.stop_recording()
+            else:
+                return {"error": f"unknown action {action!r}"}
+        except Exception as exc:
+            return {"error": str(exc)}
+
+    def server_osc(self, action: str, config: dict | None = None) -> dict:
+        """Start or stop OSC output."""
+        if not hasattr(self, "_actions") or self._actions is None:
+            return {"error": "Server control not enabled"}
+        try:
+            if action == "start":
+                return self._actions.start_osc(config)
+            elif action == "stop":
+                return self._actions.stop_osc()
+            else:
+                return {"error": f"unknown action {action!r}"}
+        except Exception as exc:
+            return {"error": str(exc)}
+
+    def server_lsl(self, action: str, config: dict | None = None) -> dict:
+        """Start or stop LSL output."""
+        if not hasattr(self, "_actions") or self._actions is None:
+            return {"error": "Server control not enabled"}
+        try:
+            if action == "start":
+                return self._actions.start_lsl(config)
+            elif action == "stop":
+                return self._actions.stop_lsl()
+            else:
+                return {"error": f"unknown action {action!r}"}
+        except Exception as exc:
+            return {"error": str(exc)}
+
+    def server_register_preset(self, preset: str) -> dict:
+        """Apply an ADS1299 register preset."""
+        if not hasattr(self, "_actions") or self._actions is None:
+            return {"error": "Server control not enabled"}
+        try:
+            return self._actions.apply_register_preset(preset)
+        except Exception as exc:
+            return {"error": str(exc)}
+
+    def server_webhooks(self) -> dict:
+        """List server webhook rules."""
+        if not hasattr(self, "_actions") or self._actions is None:
+            return {"error": "Server control not enabled"}
+        try:
+            return self._actions.list_webhooks()
+        except Exception as exc:
+            return {"error": str(exc)}

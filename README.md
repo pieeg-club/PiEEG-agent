@@ -18,9 +18,39 @@ export ANTHROPIC_API_KEY=sk-ant-...  # or use --provider echo for testing
 pieeg-agent web
 ```
 
-Open http://localhost:8765 → Chat with your brain data in real-time.
+Open http://localhost:8000 → Chat with your brain data in real-time.
 
 **No hardware?** Mock server generates realistic multi-channel EEG over LSL.
+
+**No API key?** If you run `pieeg-agent web` (or `chat`, `ask`) without configuring an LLM provider, you'll get an **interactive setup wizard**:
+
+```
+🤖 LLM Provider Setup
+==================================================
+Choose a provider to power the brain copilot:
+
+  1. Anthropic
+  2. OpenAI
+  3. Groq
+  4. Together AI
+  5. Ollama (local, no key needed)
+  6. LM Studio (local, no key needed)
+  7. Echo (debug, no key needed)
+
+Select provider [1-7]: 1
+
+✓ Selected: Anthropic
+
+🔑 API Key Required
+This provider needs an API key stored in $ANTHROPIC_API_KEY
+Get yours from:
+  → https://console.anthropic.com/settings/keys
+
+Enter your Anthropic API key: ********
+✓ API key received
+```
+
+The wizard sets environment variables for your session — **no files are written**. To persist configuration, set the env vars in your shell profile or use `.env` files.
 
 ---
 
@@ -315,6 +345,18 @@ This prevents spurious events from noise or motion.
 
 ## ⚙️ Configuration
 
+### Interactive Setup
+
+When you run a command that needs an LLM provider (`web`, `chat`, `ask`) without proper configuration, you'll get an **interactive setup wizard** that guides you through:
+
+1. **Provider selection** — Choose from 7 providers (cloud or local)
+2. **API key input** — Secure prompt (hidden input) for cloud providers
+3. **Automatic env var setup** — Sets variables for your session
+
+The wizard only runs in interactive terminals (when `stdin.isatty()` is true). For non-interactive environments (CI, Docker, systemd), set environment variables directly.
+
+### Environment Variables
+
 All tunables have env-var overrides and CLI flags:
 
 | Setting | Env Var | Default | Notes |
@@ -334,6 +376,18 @@ export PIEEG_LLM_PROVIDER=ollama
 export PIEEG_LLM_MODEL=llama3.2
 pieeg-agent chat                # uses local Llama, no key needed
 ```
+
+### Supported Providers
+
+| Provider | Type | API Key Needed | Get Key From |
+|----------|------|----------------|--------------|
+| Anthropic | Cloud | ✅ `ANTHROPIC_API_KEY` | https://console.anthropic.com/settings/keys |
+| OpenAI | Cloud | ✅ `OPENAI_API_KEY` | https://platform.openai.com/api-keys |
+| Groq | Cloud | ✅ `GROQ_API_KEY` | https://console.groq.com/keys |
+| Together AI | Cloud | ✅ `TOGETHER_API_KEY` | https://api.together.xyz/settings/api-keys |
+| Ollama | Local | ❌ None | Install from https://ollama.ai |
+| LM Studio | Local | ❌ None | Install from https://lmstudio.ai |
+| Echo | Debug | ❌ None | Built-in keyword matcher |
 
 ---
 

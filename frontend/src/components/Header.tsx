@@ -6,10 +6,12 @@ export function Header({
   info,
   connected,
   onSettings,
+  onSystem,
 }: {
   info: Info | null;
   connected: boolean;
   onSettings: () => void;
+  onSystem: () => void;
 }) {
   return (
     <header className="app-header">
@@ -22,6 +24,10 @@ export function Header({
         {info?.stream && <span className="chip">{info.stream}</span>}
         {info?.channels != null && <span className="chip">{info.channels} ch</span>}
         {info?.rate != null && <span className="chip">{info.rate} Hz</span>}
+        <button className="chip chip-clickable" onClick={onSystem} title="System control">
+          System
+          <span className="chip-icon">🎛</span>
+        </button>
         {info?.provider && (
           <button className="chip chip-accent chip-clickable" onClick={onSettings}>
             {info.provider}

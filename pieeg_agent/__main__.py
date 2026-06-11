@@ -33,6 +33,87 @@ from . import __version__
 from .config import PROVIDERS, AgentConfig
 
 
+def _interactive_llm_setup() -> tuple[str, str]:
+    """Prompt user to select a provider and enter API key if needed.
+    
+    Returns (provider_name, api_key_or_empty).
+    """
+    print("\n🤖 LLM Provider Setup")
+    print("=" * 50)
+    print("Choose a provider to power the brain copilot:\n")
+    
+    # Build menu from PROVIDERS registry
+    providers_list = []
+    idx = 1
+    for key, spec in sorted(PROVIDERS.items()):
+        providers_list.append((key, spec))
+        label = spec.get("label", key)
+        needs_key = spec.get("env_key", "")
+        suffix = " (local, no key needed)" if not needs_key else ""
+        print(f"  {idx}. {label}{suffix}")
+        idx += 1
+    
+    print()
+    
+    # Get user choice
+    while True:
+        try:
+            choice = input(f"Select provider [1-{len(providers_list)}]: ").strip()
+            if not choice:
+                continue
+            choice_idx = int(choice) - 1
+            if 0 <= choice_idx < len(providers_list):
+                provider_key, provider_spec = providers_list[choice_idx]
+                break
+            else:
+                print(f"Please enter a number between 1 and {len(providers_list)}")
+        except (ValueError, KeyboardInterrupt):
+            print("\nSetup cancelled.")
+            sys.exit(1)
+    
+    provider_label = provider_spec.get("label", provider_key)
+    print(f"\n✓ Selected: {provider_label}")
+    
+    # Get API key if needed
+    env_key = provider_spec.get("env_key", "")
+    if env_key:
+        print(f"\n🔑 API Key Required")
+        print(f"This provider needs an API key stored in ${env_key}")
+        print("Get yours from:")
+        
+        # Provider-specific help
+        if provider_key == "anthropic":
+            print("  → https://console.anthropic.com/settings/keys")
+        elif provider_key == "openai":
+            print("  → https://platform.openai.com/api-keys")
+        elif provider_key == "groq":
+            print("  → https://console.groq.com/keys")
+        elif provider_key == "together":
+            print("  → https://api.together.xyz/settings/api-keys")
+        
+        print()
+        
+        try:
+            # Use getpass to hide input (API keys are secrets)
+            import getpass
+            api_key = getpass.getpass(f"Enter your {provider_label} API key: ").strip()
+            if not api_key:
+                print("\n❌ API key cannot be empty.")
+                sys.exit(1)
+            print("✓ API key received")
+        except (KeyboardInterrupt, EOFError):
+            print("\nSetup cancelled.")
+            sys.exit(1)
+    else:
+        api_key = ""
+        print("✓ No API key needed (local provider)")
+    
+    print("\n" + "=" * 50)
+    print("Setup complete! Starting agent...\n")
+    
+    return provider_key, api_key
+
+
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="pieeg-agent",
@@ -590,6 +671,7 @@ class _CopilotSession:
     senses: object
     decode: object
     cfg: object
+    actions: object = None  # ServerActions when --allow-actions is set
 
 
 def _start_copilot(args):
@@ -625,11 +707,45 @@ def _start_copilot(args):
 
     # Fail fast on LLM config *before* touching hardware, so the user isn't
     # told to plug in a headset only to hit a missing-key error afterwards.
+    # If provider is not configured, prompt interactively.
+    provider = None
     try:
         provider = get_provider(cfg)
     except ProviderError as exc:
-        print(f"LLM provider not ready: {exc}", file=sys.stderr)
-        return None
+        # Check if this is a missing API key error and if we're in an interactive terminal
+        if sys.stdin.isatty() and "API key" in str(exc):
+            # Interactive setup
+            provider_name, api_key = _interactive_llm_setup()
+            
+            # Set environment variables for this session
+            if api_key:
+                spec = PROVIDERS.get(provider_name, {})
+                env_key = spec.get("env_key", "")
+                if env_key:
+                    os.environ[env_key] = api_key
+            
+            # Rebuild config with the selected provider
+            cfg = AgentConfig.from_env(
+                lsl_name=args.name,
+                lsl_type=args.stype,
+                lsl_resolve_by=args.by,
+                provider=provider_name,
+                model=args.model,
+                ring_seconds=args.ring_seconds,
+            )
+            
+            # Retry provider creation
+            try:
+                provider = get_provider(cfg)
+            except ProviderError as retry_exc:
+                print(f"LLM provider setup failed: {retry_exc}", file=sys.stderr)
+                return None
+        else:
+            # Non-interactive or different error - fail with original message
+            print(f"LLM provider not ready: {exc}", file=sys.stderr)
+            print("\nTip: Run this command interactively to configure the provider,", file=sys.stderr)
+            print("     or set the required environment variables.", file=sys.stderr)
+            return None
 
     # Optionally bring up the gated actuator side (also before hardware, so a
     # bad control URL fails fast). Default sessions stay read-only.
@@ -678,9 +794,22 @@ def _start_copilot(args):
     if actuator is not None:
         tools = CombinedToolset(senses, decode, actuator)
         copilot = Copilot(provider, tools, system=ACTUATOR_SYSTEM_PROMPT)
+        # Build actions for direct web control (reuses the same client/gate)
+        from .server import ActionGate, ActionPolicy, AuditLog, ServerActions
+        audit_path = (
+            None if getattr(args, "no_audit_log", False) else
+            _audit_log_path(args)
+        )
+        gate = ActionGate(
+            policy=ActionPolicy(allowed=SAFE_ACTIONS),
+            audit=AuditLog(audit_path),
+            dry_run=not getattr(args, "execute", False),
+        )
+        actions = ServerActions(client, gate)
     else:
         tools = CombinedToolset(senses, decode)
         copilot = Copilot(provider, tools, system=SYSTEM_PROMPT)
+        actions = None
     return _CopilotSession(
         copilot=copilot,
         inlet=inlet,
@@ -689,6 +818,7 @@ def _start_copilot(args):
         senses=senses,
         decode=decode,
         cfg=cfg,
+        actions=actions,
     )
 
 
@@ -889,6 +1019,7 @@ def cmd_web(args) -> int:
         senses=started.senses,
         decode=started.decode,
         info=info,
+        actions=started.actions,
     )
     static_dir = args.static_dir or _default_static_dir()
     app = create_app(engine, static_dir=static_dir)
