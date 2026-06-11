@@ -26,6 +26,7 @@ goes through the :class:`~pieeg_agent.decode.store.PatternStore`.
 
 from __future__ import annotations
 
+import logging
 import threading
 import time
 from collections import deque
@@ -50,10 +51,14 @@ from ..decode import (
 from ..perceive.cascade import PerceptionCascade
 from .tools import Tool, _spec
 
+logger = logging.getLogger("pieeg.agent.decode_tools")
+
 # A few seconds is long enough to gather frames, short enough not to bore the
 # user mid-conversation; clamp record requests into a sane band.
 _MIN_SEGMENT_S = 1.0
 _MAX_SEGMENT_S = 20.0
+_MAX_REPS = 8            # prevent runaway training loops
+_MIN_REPS = 2            # minimum required for meaningful CV
 
 # A labelled session is a longer lab window; allow up to a couple of minutes.
 _MIN_SESSION_S = 2.0
@@ -206,11 +211,17 @@ class DecodeTools:
         self._add(Tool(
             _spec(
                 "record_segment",
-                "Record one labelled segment of the current training session "
+                "Record ONE labelled segment of the current training session "
                 "from the live signal. label='rest' for the baseline, "
                 "label='active' while the user performs the pattern. Blocks for "
                 "'seconds' (default 4) while it gathers frames. Tell the user "
-                "what to do BEFORE calling this. Each active segment is one rep.",
+                "what to do and wait for them to confirm they are ready BEFORE "
+                "calling this — it samples the live signal immediately. Each "
+                "active segment is one rep. Call this AT MOST ONCE PER TURN: a "
+                "second call in the same turn is refused so the user has time to "
+                "switch states. Always read the 'action' field in the response — "
+                "it tells you whether to keep going or to call "
+                "finish_pattern_training now.",
                 {
                     "label": {
                         "type": "string",
@@ -443,6 +454,17 @@ class DecodeTools:
             trainer = self._trainer
         if trainer is None:
             return {"error": "no training session — call start_pattern_training first"}
+        
+        # Check if we've hit the max reps limit
+        counts_before = trainer.counts()
+        if counts_before["reps"] >= _MAX_REPS:
+            return {
+                "error": f"Maximum {_MAX_REPS} reps reached. Call finish_pattern_training now.",
+                "totals": counts_before,
+                "ready": True,
+                "must_finish": True,
+            }
+        
         label = str(args.get("label") or "").strip().lower()
         if label not in (REST, ACTIVE):
             return {"error": f"label must be {REST!r} or {ACTIVE!r}"}
@@ -451,23 +473,48 @@ class DecodeTools:
         with self._lock:
             trainer.open_segment(label)
         before = trainer.counts()
+        
+        # Log recording start for user feedback
+        logger.info(f"Recording {label} segment for {seconds}s (rep {before['reps'] + 1})...")
+        
         self._sleep(seconds)            # frames stream in via on_frame meanwhile
+        
         with self._lock:
             captured = trainer.close_segment()
         counts = trainer.counts()
+        
+        logger.info(f"Recorded {captured} frames, totals: {counts['rest']} rest, {counts['active']} active ({counts['reps']} reps)")
+        
         result = {
             "status": "segment_recorded",
             "label": label,
             "captured_frames": captured,
             "totals": counts,
+            "ready": trainer.ready,
         }
+        
         if captured == 0:
             result["warning"] = (
                 "No frames captured — is the stream running? Each segment needs "
                 "the live cascade feeding frames."
             )
-        elif label == ACTIVE and counts["reps"] >= 2 and before["active"] >= 2:
-            result["hint"] = "Enough reps to finish — or record more for a better score."
+            return result
+        
+        # Strong completion signals to guide the LLM
+        reps = counts["reps"]
+        if reps >= _MAX_REPS:
+            result["must_finish"] = True
+            result["action"] = f"STOP RECORDING. Maximum {_MAX_REPS} reps reached. Call finish_pattern_training NOW."
+        elif reps >= _MIN_REPS and trainer.ready:
+            if reps >= 4:
+                result["action"] = "Training is ready! You have enough data. Call finish_pattern_training now (or record 1-2 more reps for marginal improvement)."
+            else:
+                result["action"] = "Training is ready with minimum data. Recommend 1-2 more reps, then call finish_pattern_training."
+        elif label == ACTIVE and counts["active"] >= 2:
+            result["action"] = f"Record 1 rest segment, then 1 active segment. {_MIN_REPS - reps} more active reps needed minimum."
+        else:
+            result["action"] = "Continue alternating: 1 rest segment, then 1 active segment."
+        
         return result
 
     def _finish_training(self, args: dict) -> dict:

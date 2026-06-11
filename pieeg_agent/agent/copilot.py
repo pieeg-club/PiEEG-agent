@@ -55,12 +55,26 @@ asks about a specific learned state:
 are firing right now. explain_pattern justifies one (its cross-validated score, \
 which channels it reads). A trained detector is far more meaningful than the \
 generic focus/relax indices.
-- To TEACH a new pattern, run the guided flow and narrate each step to the \
-user: start_pattern_training(name) → then alternate record_segment(label="rest")\
- while they relax and record_segment(label="active") while they do the thing, \
-3-5 reps → finish_pattern_training. Always tell the user what to do *before* \
-each record_segment, since it samples the live signal immediately. Report the \
-balanced accuracy honestly: under ~0.7 is weak, treat it as a draft.
+- To TEACH a new pattern, run it as a TURN-BASED conversation — NEVER record \
+several takes in one message. Recording samples the LIVE signal the instant you \
+call record_segment, so the user must already be settled into the right state, \
+and you must hand control back between every take:
+  1. start_pattern_training(name). Then tell the user to relax for the baseline \
+and ask them to say when they're ready. END YOUR TURN — do NOT record yet.
+  2. When the user confirms, call record_segment(label="rest") ONCE. Then tell \
+them what to do for the active state and ask them to say when ready. END YOUR \
+TURN — only one recording per message.
+  3. When they confirm, call record_segment(label="active") ONCE — that is one \
+rep. Then ask them to relax again and wait for their go-ahead.
+  4. Alternate rest/active like this for 3-5 reps total, ALWAYS one recording \
+per turn and ALWAYS waiting for the user to say they're ready first.
+  5. After each record_segment, read the "action" field in the result. When it \
+says you have enough, call finish_pattern_training. The system caps training at \
+8 reps and allows only one recording per turn, so you can never get stuck in a \
+loop — if you try to record twice in one turn the second is refused.
+  6. finish_pattern_training fits, cross-validates and saves the detector. \
+Report the balanced accuracy honestly: under ~0.7 is weak, 0.7-0.85 decent, \
+over 0.85 strong.
 
 The lab notebook (sessions) is for labelled windows you record and compare:
 - record_session(label, seconds) captures a window (e.g. "eyes-closed-rest" for \
@@ -175,7 +189,7 @@ class Copilot:
         system: str = SYSTEM_PROMPT,
         max_tokens: int = 1024,
         temperature: float = 0.0,
-        max_tool_iters: int = 6,
+        max_tool_iters: int = 10,
     ):
         self._provider = provider
         self._tools = tools
@@ -225,6 +239,14 @@ class Copilot:
 
         total = Usage()
         used_tools: list[str] = []
+        # Pattern training is interactive: recording samples the *live* signal
+        # the instant it is called, so the user must physically settle into each
+        # state between takes. Cap recordings at one per user turn so the model
+        # cannot chain takes (which freezes the UI for seconds and captures the
+        # wrong mental state) — a second take in the same turn is short-circuited
+        # with guidance to hand control back to the user.
+        records_this_turn = 0
+
         for iteration in range(1, self._max_tool_iters + 1):
             resp = yield from self._stream_turn(self._tools.specs())
             total = total + resp.usage
@@ -251,11 +273,48 @@ class Copilot:
             # Execute each requested tool and feed results back.
             for call in resp.tool_calls:
                 used_tools.append(call.name)
+
+                # Enforce the one-recording-per-turn rule for guided training.
+                if call.name == "record_segment" and records_this_turn >= 1:
+                    guidance = {
+                        "status": "wait_for_user",
+                        "action": (
+                            "You already recorded one segment this turn. STOP — "
+                            "do NOT record again now. Tell the user exactly what "
+                            "to do for the next segment (relax for 'rest', or "
+                            "perform the pattern for 'active'), ask them to say "
+                            "when they are ready, then END YOUR TURN and wait for "
+                            "their reply before the next record_segment."
+                        ),
+                    }
+                    yield CopilotEvent(
+                        type="tool_start", name=call.name, arguments=call.arguments
+                    )
+                    yield CopilotEvent(
+                        type="tool_result", name=call.name, result=guidance
+                    )
+                    self._history.append(
+                        Message(
+                            role="tool",
+                            tool_call_id=call.id,
+                            content=json.dumps(guidance),
+                        )
+                    )
+                    continue
+                if call.name == "record_segment":
+                    records_this_turn += 1
+
                 yield CopilotEvent(
                     type="tool_start", name=call.name, arguments=call.arguments
                 )
                 result = self._tools.call(call.name, call.arguments)
                 logger.debug("tool %s(%s) -> %s", call.name, call.arguments, result)
+
+                # Surface guided-training guidance to the logs for debugging.
+                if call.name == "record_segment" and isinstance(result, dict) \
+                        and "action" in result:
+                    logger.info("Training guidance: %s", result["action"])
+
                 yield CopilotEvent(type="tool_result", name=call.name, result=result)
                 self._history.append(
                     Message(

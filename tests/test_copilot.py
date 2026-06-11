@@ -122,3 +122,60 @@ def test_reset_clears_history():
     copilot.ask("second")
     # Only the second exchange remains.
     assert [m.content for m in copilot.history if m.role == "user"] == ["second"]
+
+
+class _CountingToolset:
+    """Minimal toolset that records how often each tool is actually invoked."""
+
+    def __init__(self):
+        self.calls: list[tuple[str, dict]] = []
+
+    def specs(self):
+        return []
+
+    def call(self, name, arguments=None):
+        self.calls.append((name, dict(arguments or {})))
+        return {"status": "segment_recorded", "label": (arguments or {}).get("label")}
+
+
+def test_record_segment_capped_at_one_per_turn():
+    # If the model tries to chain two record_segment calls in one turn, only the
+    # first is actually executed; the second is short-circuited with guidance so
+    # control returns to the user (no UI freeze, no wrong-state capture).
+    provider = ScriptedProvider([
+        LLMResponse(
+            tool_calls=[
+                ToolCall(id="r1", name="record_segment",
+                         arguments={"label": "rest"}),
+                ToolCall(id="r2", name="record_segment",
+                         arguments={"label": "active"}),
+            ]
+        ),
+        LLMResponse(text="Relax and tell me when you're ready."),
+    ])
+    tools = _CountingToolset()
+    copilot = Copilot(provider, tools)
+    result = copilot.ask("train me on focus")
+
+    # Only the first recording actually ran; the second never reached the tool.
+    record_calls = [c for c in tools.calls if c[0] == "record_segment"]
+    assert len(record_calls) == 1
+    assert record_calls[0][1]["label"] == "rest"
+
+    # The model still saw a tool result for the refused call (so it can react).
+    tool_msgs = [m for m in copilot.history if m.role == "tool"]
+    assert len(tool_msgs) == 2
+    assert "wait_for_user" in tool_msgs[1].content
+
+    # The fresh next turn allows recording again (counter resets per turn).
+    provider._responses = [
+        LLMResponse(
+            tool_calls=[ToolCall(id="r3", name="record_segment",
+                                 arguments={"label": "active"})]
+        ),
+        LLMResponse(text="Got it."),
+    ]
+    copilot.ask("ready")
+    record_calls = [c for c in tools.calls if c[0] == "record_segment"]
+    assert len(record_calls) == 2
+
