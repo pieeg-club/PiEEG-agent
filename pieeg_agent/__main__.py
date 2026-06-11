@@ -803,6 +803,7 @@ def _start_copilot(args) -> _CopilotSession | None:
         DocumentationTools,
         NeuralTools,
         UtilityTools,
+        WebTools,
     )
     from .llm import ProviderError, get_provider
     from .perceive import CascadeConfig, PerceptionCascade
@@ -958,8 +959,9 @@ def _start_copilot(args) -> _CopilotSession | None:
 
     if actuator is not None:
         # Update utility with all toolsets for complete discovery
-        utility = UtilityTools([senses, decode, docs, actuator, utility], session_metadata)
-        tools = CombinedToolset(senses, decode, docs, actuator, utility)
+        web = WebTools()
+        utility = UtilityTools([senses, decode, docs, actuator, web, utility], session_metadata)
+        tools = CombinedToolset(senses, decode, docs, actuator, web, utility)
         copilot = Copilot(provider, tools, system=ACTUATOR_SYSTEM_PROMPT)
         # Build actions for direct web control (reuses the same client/gate)
         from .server import ActionGate, ActionPolicy, ServerActions
@@ -970,8 +972,9 @@ def _start_copilot(args) -> _CopilotSession | None:
         actions = ServerActions(client, gate)
     else:
         # Update utility with all toolsets for complete discovery
-        utility = UtilityTools([senses, decode, docs, utility], session_metadata)
-        tools = CombinedToolset(senses, decode, docs, utility)
+        web = WebTools()
+        utility = UtilityTools([senses, decode, docs, web, utility], session_metadata)
+        tools = CombinedToolset(senses, decode, docs, web, utility)
         copilot = Copilot(provider, tools, system=SYSTEM_PROMPT)
         actions = None
     return _CopilotSession(

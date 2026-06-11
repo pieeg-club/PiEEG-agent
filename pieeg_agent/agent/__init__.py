@@ -22,12 +22,14 @@ from .decode_tools import DecodeTools
 from .doc_tools import DocumentationTools
 from .tools import CombinedToolset, NeuralTools, Tool, Toolset
 from .utility_tools import UtilityTools
+from .web_tools import WebTools
 
 __all__ = [
     "NeuralTools",
     "DecodeTools",
     "DocumentationTools",
     "UtilityTools",
+    "WebTools",
     "Tool",
     "Toolset",
     "CombinedToolset",

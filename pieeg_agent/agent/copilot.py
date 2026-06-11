@@ -95,6 +95,20 @@ questions like "how do I place electrodes?", "what's the sampling rate?", "LSL \
 not working", "signal is noisy". Ground setup/troubleshooting answers in these \
 docs rather than guessing.
 
+When the user asks about BCI concepts, neuroscience, or research (general \
+knowledge beyond PiEEG-specific setup):
+- search_web — search Wikipedia or PubMed for BCI/neuroscience topics. Use this \
+for questions like "what is the P300?", "alpha waves and meditation", "motor \
+imagery BCI", or "EEG research papers on focus". Returns titles, snippets and \
+URLs. Choose source="wikipedia" for general concepts or source="pubmed" for \
+research papers.
+- fetch_url — fetch content from trusted scientific/BCI sources (Wikipedia, \
+PubMed, arxiv, Nature, PLoS, Frontiers, etc.) or PiEEG websites. Domain must be \
+on the allowlist — use list_trusted_sources to see what's available.
+- list_trusted_sources — show which domains are allowed for fetch_url (Wikipedia, \
+scientific publishers, PiEEG sites). Filter by category: "wikipedia", "scientific", \
+"pieeg", or "all".
+
 General utility tools for workflow automation and introspection:
 - list_tools — discover all currently available tools across all toolsets. \
 Use this to answer "what can you do?" or when you need to check what \
