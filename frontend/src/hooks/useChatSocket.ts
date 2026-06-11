@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { openSocket, type SocketHandle } from "../socket";
 import type { ChatWireEvent } from "../types";
+import type { useLogsCapture } from "./useLogsCapture";
 
 export type ToolPart = {
   kind: "tool";
@@ -26,7 +27,7 @@ export interface ChatMessage {
 // tool_start / tool_result / done events onto the in-progress assistant turn,
 // and serialises sends behind a `busy` flag (the backend handles one turn at a
 // time). Tool calls render inline as chips, ChatGPT/Gemini style.
-export function useChatSocket() {
+export function useChatSocket(logs?: ReturnType<typeof useLogsCapture>) {
   const [messages, setMessages] = useState<ChatMessage[]>(() => {
     try {
       const saved = sessionStorage.getItem("pieeg-chat-history");
@@ -41,6 +42,12 @@ export function useChatSocket() {
   const sockRef = useRef<SocketHandle | null>(null);
   const idRef = useRef(1);
   const busyRef = useRef(false);
+  const logsRef = useRef(logs);
+
+  // Update logs ref when it changes
+  useEffect(() => {
+    logsRef.current = logs;
+  }, [logs]);
 
   const setBusy = (v: boolean) => {
     busyRef.current = v;
@@ -73,6 +80,9 @@ export function useChatSocket() {
 
   const onEvent = useCallback(
     (ev: ChatWireEvent) => {
+      // Log the event if logging is enabled
+      logsRef.current?.onChatEvent(ev);
+      
       switch (ev.type) {
         case "token":
           mutateLast((m) => {
@@ -137,8 +147,14 @@ export function useChatSocket() {
   useEffect(() => {
     const sock = openSocket("/ws/chat", {
       onMessage: (data) => onEvent(data as ChatWireEvent),
-      onOpen: () => setConnected(true),
-      onClose: () => setConnected(false),
+      onOpen: () => {
+        setConnected(true);
+        logsRef.current?.onWebSocketEvent("open", "/ws/chat");
+      },
+      onClose: () => {
+        setConnected(false);
+        logsRef.current?.onWebSocketEvent("close", "/ws/chat");
+      },
     });
     sockRef.current = sock;
     return () => sock.close();
@@ -148,6 +164,10 @@ export function useChatSocket() {
     const t = text.trim();
     if (!t || busyRef.current) return;
     const ok = sockRef.current?.send({ message: t });
+    
+    // Log user message
+    logsRef.current?.onUserMessage(t);
+    
     setMessages((prev) => [
       ...prev,
       { id: idRef.current++, role: "user", parts: [{ kind: "text", text: t }], done: true },

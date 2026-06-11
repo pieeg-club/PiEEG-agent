@@ -109,8 +109,8 @@ export function TrainingOverlay({
     const res = await train.finish(0.6);
     setResult(res);
     setStep("result");
-    if (res.cross_validation?.balanced_accuracy) {
-      const acc = res.cross_validation.balanced_accuracy;
+    if (res.balanced_accuracy != null) {
+      const acc = res.balanced_accuracy;
       if (acc >= 0.7) {
         toast.success(`Pattern trained! ${pct(acc)} accuracy`);
       } else {

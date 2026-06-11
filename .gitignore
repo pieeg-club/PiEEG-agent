@@ -4,8 +4,11 @@ __pycache__/
 *.egg-info/
 *.egg
 build/
-dist/
 .eggs/
+
+# Frontend build artifacts (node_modules ignored, but dist committed)
+frontend/node_modules/
+frontend/.vite/
 
 # Virtual environments
 .venv/

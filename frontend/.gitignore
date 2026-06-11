@@ -1,8 +1,10 @@
-# dependencies & build output
+# dependencies
 node_modules/
-dist/
 
 # logs & caches
 *.log
 .vite/
 .DS_Store
+
+# Note: dist/ is committed so users don't need to build the frontend
+# Only ignore it during development if you want clean git status

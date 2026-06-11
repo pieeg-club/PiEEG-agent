@@ -7,11 +7,13 @@ export function Header({
   connected,
   onSettings,
   onSystem,
+  onLogs,
 }: {
   info: Info | null;
   connected: boolean;
   onSettings: () => void;
   onSystem: () => void;
+  onLogs: () => void;
 }) {
   return (
     <header className="app-header">
@@ -24,6 +26,10 @@ export function Header({
         {info?.stream && <span className="chip">{info.stream}</span>}
         {info?.channels != null && <span className="chip">{info.channels} ch</span>}
         {info?.rate != null && <span className="chip">{info.rate} Hz</span>}
+        <button className="chip chip-clickable" onClick={onLogs} title="System logs & debug">
+          Logs
+          <span className="chip-icon">📋</span>
+        </button>
         <button className="chip chip-clickable" onClick={onSystem} title="System control">
           System
           <span className="chip-icon">🎛</span>

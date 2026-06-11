@@ -5,25 +5,29 @@ import { ArtifactFeed, BandBars, QualityGrid, StateCard } from "./components/Bra
 import { ConnectivityCard } from "./components/ConnectivityCard";
 import { Header } from "./components/Header";
 import { LLMSettings } from "./components/LLMSettings";
+import { LogsPanel } from "./components/LogsPanel";
 import { PatternModal } from "./components/PatternModal";
 import { PatternTicker } from "./components/PatternTicker";
 import { SystemControl } from "./components/SystemControl";
 import { toast, ToastContainer } from "./components/Toast";
 import { TrainingOverlay } from "./components/TrainingOverlay";
 import { useChatSocket } from "./hooks/useChatSocket";
+import { useLogsCapture } from "./hooks/useLogsCapture";
 import { useLiveSocket } from "./hooks/useLiveSocket";
 import { useTrainSocket } from "./hooks/useTrainSocket";
 import type { Info, PatternExplain } from "./types";
 
 export default function App() {
+  const logs = useLogsCapture();
   const { snapshot, connected } = useLiveSocket();
-  const chat = useChatSocket();
+  const chat = useChatSocket(logs);
   const train = useTrainSocket();
 
   const [info, setInfo] = useState<Info | null>(null);
   const [training, setTraining] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [showSystem, setShowSystem] = useState(false);
+  const [showLogs, setShowLogs] = useState(false);
   const [explain, setExplain] = useState<{ name: string; data: PatternExplain | null } | null>(null);
 
   useEffect(() => {
@@ -57,6 +61,7 @@ export default function App() {
         connected={connected} 
         onSettings={() => setShowSettings(true)}
         onSystem={() => setShowSystem(true)}
+        onLogs={() => setShowLogs(true)}
       />
       <main className="layout">
         <Chat
@@ -87,6 +92,18 @@ export default function App() {
       )}
       {showSettings && <LLMSettings info={info} onClose={() => setShowSettings(false)} />}
       {showSystem && <SystemControl onClose={() => setShowSystem(false)} />}
+      {showLogs && (
+        <LogsPanel
+          logs={logs.logs}
+          enabled={logs.enabled}
+          filter={logs.filter}
+          onToggleEnabled={logs.setEnabled}
+          onFilterChange={logs.setFilter}
+          onToggleExpanded={logs.toggleExpanded}
+          onClear={logs.clearLogs}
+          onClose={() => setShowLogs(false)}
+        />
+      )}
       <ToastContainer />
     </div>
   );
