@@ -22,13 +22,43 @@ export type TextPart = { kind: "text"; text: string };
 export type Part = TextPart | ToolPart;
 
 export interface ChatMessage {
-  id: number;
+  id: string;
   role: "user" | "assistant";
   parts: Part[];
   done: boolean;
   error?: boolean;
   usage?: { input_tokens: number; output_tokens: number };
   iterations?: number;
+}
+
+const CHAT_VERSION = "v3"; // Increment to invalidate old cached conversations
+
+// Generate a unique message ID using crypto API or fallback
+function generateMessageId(): string {
+  if (typeof crypto !== 'undefined' && crypto.randomUUID) {
+    return crypto.randomUUID();
+  }
+  // Fallback: timestamp + random
+  return `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+}
+
+// Clear old cached data on version change
+function checkAndClearOldCache(): void {
+  const storedVersion = localStorage.getItem("pieeg-chat-version");
+  if (storedVersion !== CHAT_VERSION) {
+    localStorage.setItem("pieeg-chat-version", CHAT_VERSION);
+    const keys = Object.keys(localStorage);
+    keys.forEach(key => {
+      if (key.startsWith("pieeg-conv-") || key === "pieeg-current-conversation") {
+        localStorage.removeItem(key);
+      }
+    });
+    try {
+      sessionStorage.removeItem("pieeg-chat-history");
+    } catch {
+      // Ignore
+    }
+  }
 }
 
 // Drives /ws/chat: keeps the message thread, maps the streamed token /
@@ -61,9 +91,13 @@ export function useChatSocket(logs?: ReturnType<typeof useLogsCapture>) {
   const [busy, setBusyState] = useState(false);
 
   const sockRef = useRef<SocketHandle | null>(null);
-  const idRef = useRef(1);
   const busyRef = useRef(false);
   const logsRef = useRef(logs);
+
+  // Clear old cache on mount
+  useEffect(() => {
+    checkAndClearOldCache();
+  }, []);
 
   // Update logs ref when it changes
   useEffect(() => {
@@ -200,8 +234,8 @@ export function useChatSocket(logs?: ReturnType<typeof useLogsCapture>) {
     
     setMessages((prev) => [
       ...prev,
-      { id: idRef.current++, role: "user", parts: [{ kind: "text", text: t }], done: true },
-      { id: idRef.current++, role: "assistant", parts: [], done: false },
+      { id: generateMessageId(), role: "user", parts: [{ kind: "text", text: t }], done: true },
+      { id: generateMessageId(), role: "assistant", parts: [], done: false },
     ]);
     if (ok) {
       setBusy(true);

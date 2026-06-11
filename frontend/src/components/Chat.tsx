@@ -30,14 +30,14 @@ function ToolChip({ part }: { part: ToolPart }) {
   );
 }
 
-function renderPart(p: Part, i: number) {
+function renderPart(p: Part, i: number, msgId: string) {
   if (p.kind === "text") {
     const html = marked.parse(p.text, { async: false }) as string;
     return (
-      <div className="text" key={i} dangerouslySetInnerHTML={{ __html: html }} />
+      <div className="text" key={`${msgId}-text-${i}`} dangerouslySetInnerHTML={{ __html: html }} />
     );
   }
-  return <ToolChip part={p} key={i} />;
+  return <ToolChip part={p} key={`${msgId}-tool-${i}-${p.name}`} />;
 }
 
 function Bubble({ m }: { m: ChatMessage }) {
@@ -55,7 +55,7 @@ function Bubble({ m }: { m: ChatMessage }) {
     <div className={"msg " + m.role}>
       <div className="avatar">{m.role === "user" ? "You" : "Agent"}</div>
       <div className={"bubble" + (m.error ? " error" : "")}>
-        {m.parts.map(renderPart)}
+        {m.parts.map((p, i) => renderPart(p, i, m.id))}
         {m.role === "assistant" && empty && !m.done && (
           <span className="typing">
             <i />

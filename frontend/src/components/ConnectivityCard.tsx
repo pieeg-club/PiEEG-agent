@@ -67,8 +67,8 @@ export function ConnectivityCard({ conn }: Props) {
               )}
             </div>
             <div className="heatmap-labels">
-              {labels.map((ch, i) => (
-                <span key={i} className="heatmap-label">
+              {labels.map((ch) => (
+                <span key={ch} className="heatmap-label">
                   {ch}
                 </span>
               ))}

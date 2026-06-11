@@ -88,8 +88,8 @@ export function PatternModal({
               <div className="explain-section">
                 <div className="section-title">Top separating features</div>
                 <ul className="feat-list">
-                  {top.slice(0, 6).map((f, i) => (
-                    <li key={i}>
+                  {top.slice(0, 6).map((f) => (
+                    <li key={`${f.channel || 'global'}-${f.feature}`}>
                       <span>
                         {f.channel ? `${f.channel} · ` : ""}
                         {f.feature}

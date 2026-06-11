@@ -169,7 +169,7 @@ export function ArtifactFeed({ artifacts }: { artifacts?: Artifacts }) {
       ) : (
         <ul className="feed">
           {rows.map((a, i) => (
-            <li key={i} className={a.severity === "warn" ? "warn" : ""}>
+            <li key={`${a.type}-${a.channel}-${a.timestamp}-${i}`} className={a.severity === "warn" ? "warn" : ""}>
               <span className={"feed-dot " + (ART_TONE[a.type] || "")} />
               <span className="feed-type">{a.type.replace(/_/g, " ")}</span>
               <span className="feed-meta">

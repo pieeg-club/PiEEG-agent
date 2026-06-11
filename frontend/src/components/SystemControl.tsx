@@ -155,8 +155,8 @@ export function SystemControl({ onClose }: { onClose: () => void }) {
                     </tr>
                   </thead>
                   <tbody>
-                    {streams.map((s, i) => (
-                      <tr key={i}>
+                    {streams.map((s) => (
+                      <tr key={`${s.source_id}-${s.name}`}>
                         <td>{s.name}</td>
                         <td>{s.type}</td>
                         <td>{s.channels}</td>
