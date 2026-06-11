@@ -6,23 +6,49 @@ Reads from any [Lab Streaming Layer](https://labstreaminglayer.org) (LSL) EEG so
 
 ---
 
-## ⚡ 60-Second Start
+## ⚡ Quick Start: Full System with Web Interface
+
+### Complete Setup (PiEEG Hardware + Web UI + Actions)
 
 ```bash
-# Terminal 1: Start mock EEG stream
+# Terminal 1: Start PiEEG server with LSL streaming
+pieeg-server --lsl
+
+# Terminal 2: Install agent and launch web interface
+pip install -e ".[server]"  # includes control plane for device actions
+pieeg-agent web --allow-actions --execute
+```
+
+Open **http://localhost:8000** → Full brain copilot with:
+- 🧠 **Live EEG monitoring** — focus/relax/engagement, band powers, quality
+- 💬 **Natural language chat** — "am I focused?", "train a relaxation pattern", "show connectivity"
+- 🎛️ **Device control** — copilot can adjust filters, start recording, enable OSC output
+- 📊 **Pattern training** — record mental states, train classifiers, compare sessions
+
+**What `--allow-actions --execute` means:**
+- `--allow-actions`: Copilot can **preview** device actions (filters, recording, OSC)
+- `--execute`: Copilot can **actually execute** approved actions (with safety gates)
+- Without flags: Read-only mode (state monitoring, pattern training, connectivity analysis)
+
+---
+
+### Development Setup (No Hardware)
+
+```bash
+# Terminal 1: Mock EEG stream for testing
 pieeg-server --mock --lsl
 
-# Terminal 2: Launch web UI
+# Terminal 2: Launch web UI (read-only, no actions)
 pip install -e .
-export ANTHROPIC_API_KEY=sk-ant-...  # or use --provider echo for testing
+export ANTHROPIC_API_KEY=sk-ant-...  # or skip for interactive setup
 pieeg-agent web
 ```
 
-Open http://localhost:8000 → Chat with your brain data in real-time.
+Open http://localhost:8000 → Chat with synthetic brain data.
 
-**No hardware?** Mock server generates realistic multi-channel EEG over LSL.
+**No hardware?** Mock server generates realistic 8-channel EEG with configurable patterns.
 
-**No API key?** If you run `pieeg-agent web` (or `chat`, `ask`) without configuring an LLM provider, you'll get an **interactive setup wizard**:
+**No API key?** Interactive setup wizard guides you through provider selection:
 
 ```
 🤖 LLM Provider Setup
@@ -63,6 +89,91 @@ Save configuration? [Y/n]: y
 - You explicitly reset it with `pieeg-agent config reset`
 - You override with environment variables or CLI flags
 
+**Manage configuration:**
+```bash
+pieeg-agent config          # view current settings
+pieeg-agent config reset    # delete saved config
+```
+
+---
+
+## 🎛️ Device Actions & Safety
+
+### How Actions Work
+
+The copilot can **control PiEEG hardware** through a WebSocket connection to `pieeg-server`. All actions pass through a **safety gate**:
+
+```
+┌─────────────┐
+│ User request│  "start recording and set filter to 1-40 Hz"
+└──────┬──────┘
+       ▼
+┌─────────────────────────────────────────────────────┐
+│ LLM Copilot                                         │
+│  • Understands intent                               │
+│  • Calls: start_recording(), set_filter(1, 40)     │
+└──────┬──────────────────────────────────────────────┘
+       ▼
+┌─────────────────────────────────────────────────────┐
+│ Safety Gate                                         │
+│  ✓ Allowlist check (is this action permitted?)     │
+│  ✓ Dry-run mode check (preview vs execute?)        │
+│  ✓ Cooldown check (not too soon after last call?)  │
+│  ✓ Audit log (record attempt + outcome)            │
+└──────┬──────────────────────────────────────────────┘
+       ▼
+┌─────────────────────────────────────────────────────┐
+│ PiEEG Server (if approved)                          │
+│  • Filter updated: 1-40 Hz                          │
+│  • Recording started: data.csv                      │
+└─────────────────────────────────────────────────────┘
+```
+
+### Action Modes
+
+| Mode | Command | Behavior |
+|------|---------|----------|
+| **Read-only** | `pieeg-agent web` | No device control, only monitoring/analysis |
+| **Preview** | `pieeg-agent web --allow-actions` | Shows what it would do, doesn't execute |
+| **Execute** | `pieeg-agent web --allow-actions --execute` | Actually controls device (gated) |
+
+### Available Actions
+
+| Action | What it does | Gated? |
+|--------|--------------|--------|
+| `server_status` | Read device state (sample rate, channels, filter) | ❌ Read-only |
+| `set_filter` | Adjust band-pass filter range | ✅ Yes |
+| `start_recording` / `stop_recording` | Server-side CSV recording | ✅ Yes |
+| `start_osc` / `stop_osc` | OSC output for external apps (VRChat, Unity) | ✅ Yes |
+| `apply_register_preset` | ADS1299 chip preset (normal/test/short) | ✅ Yes |
+
+### Example: Web UI with Actions
+
+```bash
+# Full control mode
+pieeg-agent web --allow-actions --execute
+```
+
+In chat:
+```
+you > what's my current filter setting?
+  (calls: server_status)
+copilot > Band-pass is 0.5–45 Hz, 8 channels active at 250 Hz.
+
+you > narrow it to 1–30 Hz for cleaner alpha
+  (calls: set_filter)
+copilot > Done. Filter updated to 1–30 Hz.
+
+you > start a 5-minute recording
+  (calls: start_recording)
+copilot > Recording started — saving to data_20260611_143052.csv on the server.
+```
+
+**Safety features:**
+- **Cooldown**: Can't spam the same action (default: 2-3 seconds between calls)
+- **Audit log**: Every attempt logged to `~/.pieeg-agent/audit.jsonl`
+- **Dry-run default**: Must explicitly add `--execute` to actually control device
+
 ---
 
 ## 🧪 Lab Features — What You Can Do
@@ -92,60 +203,142 @@ This architecture is proven in production BCI systems (BrainFlow + Lab Streaming
 
 ---
 
-## 🧠 Architecture: Perceive → Reason → Act
+## 🧠 System Architecture
+
+### Full Integration with PiEEG Hardware
 
 ```
-┌──────────────────────────────────────────────────────────────┐
-│  Any LSL EEG source (PiEEG, OpenBCI, Muse, mock, etc.)      │
-│    └─> Lab Streaming Layer (LSL) outlet                      │
-└────────────────────────┬─────────────────────────────────────┘
-                         │ High-rate multi-channel EEG
-                         ▼
-┌──────────────────────────────────────────────────────────────┐
-│  PERCEIVE: Ring buffer + cascade                             │
-│    • LSLInlet: chunked pulls, no backpressure                │
-│    • Features: FFT → band powers (δθαβγ), quality scores     │
-│    • State: EMA smoothing → focus/relax/engagement [0-1]     │
-│    • Events: debounced transitions ("focus_high" @timestamp) │
-│    • Artifacts: blink/jaw/movement detection                 │
-└────────────────────────┬─────────────────────────────────────┘
-                         │ 1 Hz state + sparse events
-                         ▼
-┌──────────────────────────────────────────────────────────────┐
-│  DECODE: ML + lab features                                   │
-│    • Patterns: L2+group-lasso binary classifiers (LORO-CV)   │
-│    • Connectivity: cross-channel amplitude coupling (r)      │
-│    • Sessions: labelled windows + Cohen's d comparison       │
-└────────────────────────┬─────────────────────────────────────┘
-                         │ tool-callable summaries
-                         ▼
-┌──────────────────────────────────────────────────────────────┐
-│  REASON: LLM copilot (provider-agnostic)                     │
-│    • Tools: neural state, patterns, connectivity, sessions   │
-│    • Providers: Anthropic, OpenAI, Groq, Ollama, LM Studio   │
-│    • No vendor SDK — plain HTTP via stdlib                   │
-│    • Web UI: FastAPI + React/TS (same copilot backend)       │
-└────────────────────────┬─────────────────────────────────────┘
-                         │ tool calls
-                         ▼
-┌──────────────────────────────────────────────────────────────┐
-│  ACT: Gated control plane (opt-in, PiEEG-server only)        │
-│    • WebSocket → PiEEG-server :1616                          │
-│    • Allowlist + dry-run + cooldown + audit log              │
-│    • Filter, recording, OSC, register presets                │
-└──────────────────────────────────────────────────────────────┘
+┌────────────────────────────────────────────────────────────────────┐
+│  PiEEG Hardware + Server (Raspberry Pi or PC)                      │
+│  ┌──────────────────────────────────────────────────────────────┐ │
+│  │ ADS1299 → pieeg-server                                       │ │
+│  │   • 8-ch EEG @ 250 Hz                                        │ │
+│  │   • Hardware filtering                                       │ │
+│  │   • CSV recording                                            │ │
+│  │   • LSL broadcast (EEG data)                                 │ │
+│  │   • WebSocket :1616 (control commands)                       │ │
+│  └──────────────────────────────────────────────────────────────┘ │
+└────────┬───────────────────────────────────────────────┬───────────┘
+         │ LSL stream                                    │ WebSocket
+         │ (EEG data)                                    │ (actions)
+         ▼                                               ▼
+┌────────────────────────────────────────────────────────────────────┐
+│  PiEEG-Agent (same machine or remote)                              │
+│  ┌──────────────────────────────────────────────────────────────┐ │
+│  │ PERCEIVE: High-rate → semantic pyramid                       │ │
+│  │   T0: Raw 250 Hz µV samples → ring buffer (60s)              │ │
+│  │   T1: FFT → band powers (δθαβγ) @ 8 Hz                       │ │
+│  │   T2: State indices (focus/relax/engagement) @ 1 Hz          │ │
+│  │   T3: Events (focus_high, quality_drop) @ sparse             │ │
+│  └──────────────────────────────────────────────────────────────┘ │
+│  ┌──────────────────────────────────────────────────────────────┐ │
+│  │ DECODE: Lab notebook tools                                   │ │
+│  │   • Patterns: train classifiers (L2+group-lasso, LORO-CV)    │ │
+│  │   • Connectivity: cross-channel coupling analysis            │ │
+│  │   • Sessions: capture + compare with Cohen's d               │ │
+│  └──────────────────────────────────────────────────────────────┘ │
+│  ┌──────────────────────────────────────────────────────────────┐ │
+│  │ REASON: LLM copilot                                          │ │
+│  │   • Reads: neural state, quality, events, patterns           │ │
+│  │   • Writes: device actions (if --allow-actions --execute)    │ │
+│  │   • Providers: Anthropic, OpenAI, Groq, Ollama, etc.         │ │
+│  └──────────────────────────────────────────────────────────────┘ │
+│  ┌──────────────────────────────────────────────────────────────┐ │
+│  │ ACT: Safety gate (optional, with --allow-actions)            │ │
+│  │   ✓ Allowlist → ✓ Cooldown → ✓ Dry-run check → ✓ Audit      │ │
+│  └──────────────────────────────────────────────────────────────┘ │
+└────────┬───────────────────────────────────────────────────────────┘
+         │ http://localhost:8000
+         ▼
+┌────────────────────────────────────────────────────────────────────┐
+│  Web Interface (browser)                                           │
+│    • Chat with brain copilot                                       │
+│    • Live EEG state cards                                          │
+│    • Pattern training UI                                           │
+│    • System control panel                                          │
+└────────────────────────────────────────────────────────────────────┘
 ```
 
-**Why this matters:**
-- **Scientifically honest**: Indices are within-session relative, not clinical claims. Warm-up and poor signal are surfaced before giving numbers.
-- **Debuggable**: Channel-level quality verdicts, event logs with timestamps, tool call traces.
-- **Decoupled**: Swap LLM providers without changing perception. Run perception without LLM. Test with mock signal.
-- **Lab-grade features**: Pattern training (regularized classifiers + LORO-CV), connectivity analysis (amplitude coupling), session comparison (Cohen's d) — all in natural language.
-- **Safe by default**: Device actions require opt-in flags and are audited.
+### Standalone LSL Mode (No PiEEG Server)
+
+```
+┌──────────────────────────────────────────┐
+│  Any LSL Source                          │
+│  (OpenBCI, Muse, EMOTIV, Mock, etc.)     │
+└────────┬─────────────────────────────────┘
+         │ LSL stream only
+         ▼
+┌──────────────────────────────────────────┐
+│  PiEEG-Agent (read-only mode)            │
+│    ✓ PERCEIVE                            │
+│    ✓ DECODE                              │
+│    ✓ REASON                              │
+│    ✗ ACT (no device to control)          │
+└──────────────────────────────────────────┘
+```
+
+### Design Principles
+
+| Principle | Implementation | Benefit |
+|-----------|----------------|---------|
+| **Ingestion never blocks** | Dedicated LSL thread, ring buffer | No sample loss even if LLM is slow |
+| **LLM pulls, never pushed** | Tools request state on demand | Token costs stay sane |
+| **Language-sized representations** | Events, not voltage arrays | Models reason about "focus_high", not floats |
+| **Scientifically honest metrics** | Within-session normalization, warm-up flags | Users know what numbers mean |
+| **Decoupled layers** | Swap providers, run without LLM, test with mock | Debuggable, testable, maintainable |
+| **Safe by default** | Dry-run, cooldown, audit log | AI can't spam device commands |
 
 ---
 
 ## 📖 Usage Examples
+
+### Integration with PiEEG Server
+
+**PiEEG-server** is the hardware interface (reads from ADS1299 chip, applies filters, streams via LSL and WebSocket). **PiEEG-agent** is the AI copilot (reads LSL streams, analyzes brain state, optionally controls the server).
+
+#### Full Integration Example
+
+```bash
+# On Raspberry Pi (or same machine):
+pieeg-server --lsl --websocket --port 1616
+
+# Agent connects to:
+# - LSL stream (for EEG data)
+# - WebSocket :1616 (for device control)
+pieeg-agent web --allow-actions --execute
+```
+
+**What you can do:**
+- Chat: "Am I focused?" → reads live EEG state
+- Command: "Set filter to 8-30 Hz" → adjusts server filter
+- Train: "Record 'meditation' for 60 seconds" → captures labeled session
+- Export: "Start OSC to localhost:9000" → streams to Unity/VRChat
+
+**Environment variables** (if server isn't on localhost:1616):
+```bash
+export PIEEG_WS_URL=ws://192.168.1.100:1616
+export PIEEG_WS_TOKEN=your-auth-token  # if server requires auth
+```
+
+#### LSL-Only (No Device Control)
+
+Use **any** LSL source — OpenBCI, Muse, EMOTIV, or PiEEG:
+
+```bash
+pieeg-agent web  # read-only, no --allow-actions
+```
+
+Copilot can:
+- Monitor state (focus/relax/engagement)
+- Train patterns ("eyes-open" vs "eyes-closed")
+- Analyze connectivity (alpha coupling between channels)
+- Compare sessions (meditation vs baseline)
+
+Cannot:
+- Adjust hardware filters (no device control)
+- Start/stop recording on server (use server CLI directly)
+
+---
 
 ### 1. Discover & Validate LSL Streams
 
@@ -226,20 +419,47 @@ Press Ctrl+D to exit.
 ### 5. Web UI — Chat + Live Brain View
 
 ```bash
+# Read-only mode (monitoring + analysis)
 pieeg-agent web
-# → http://localhost:8765
+
+# With device control (preview mode)
+pieeg-agent web --allow-actions
+
+# With device control (execution mode)
+pieeg-agent web --allow-actions --execute
 ```
 
-Opens a browser-based interface with:
-- **Live chat** — same multi-turn conversation as CLI, with streaming responses
-- **Brain state cards** — real-time focus/relax/engagement, band powers, quality, connectivity
-- **Pattern training UI** — record/compare mental states with visual progress
-- **Artifact feed** — scrolling log of signal events
+Open **http://localhost:8000** for a browser-based interface with:
 
-All powered by the SAME copilot + cascade + tools as CLI — web is just another front-end.
+#### Live Brain State Cards
+- **Focus/Relax/Engagement** — 0-1 indices updated every second
+- **Band Powers** — delta, theta, alpha, beta, gamma distribution
+- **Signal Quality** — per-channel health (good/flat/rail/noisy/line)
+- **Connectivity** — cross-channel coupling in selected band
+- **Artifacts** — blink/jaw/movement detection feed
 
-Backend: FastAPI + WebSocket streams (snapshot @ 2 Hz, chat events)  
-Frontend: Vite + React/TypeScript, single-page app, dark theme
+#### Chat Interface
+- **Multi-turn conversation** — maintains context across questions
+- **Streaming responses** — see the copilot think in real-time
+- **Tool call visibility** — shows which neural/device tools are invoked
+- **LLM settings** — switch providers/models on the fly
+
+#### Pattern Training UI
+- **Record segments** — "Record 'meditation' for 60 seconds"
+- **Train classifiers** — L2+group-lasso with LORO-CV
+- **Channel importance** — see which electrodes matter
+- **Live inference** — test trained patterns in real-time
+
+#### System Control Panel (with `--allow-actions`)
+- **Filter adjustment** — change band-pass range
+- **Recording control** — start/stop CSV capture
+- **OSC streaming** — enable output to external apps
+- **Device status** — sample rate, channels, register preset
+
+**Architecture:**
+- Backend: FastAPI + WebSocket (2 Hz snapshots, chat events)
+- Frontend: Vite + React/TypeScript, dark theme
+- Same copilot/tools as CLI — web is just another interface
 
 ### 6. Lab Notebook — Pattern Recognition & Connectivity
 
@@ -298,30 +518,54 @@ Sessions capture:
 
 Comparison uses **within-session Cohen's d** (descriptive effect size, NOT a clinical/generalisation claim).
 
-### 7. Device Control (PiEEG-server only)
+### 7. Direct Device Control (CLI)
 
-**Optional control plane** for PiEEG hardware. Not needed for other LSL sources.
+**PiEEG-server control plane** — direct commands without LLM:
 
-**Direct control** (you invoke explicitly):
 ```bash
-pieeg-agent control status                          # read device state
+# Check device status
+pieeg-agent control status
+# Output:
+#   Sample rate: 250 Hz
+#   Channels: 8 active
+#   Filter: 0.5–45 Hz (enabled)
+#   Recording: inactive
+#   LSL: streaming as "PiEEG"
+
+# Adjust filter
 pieeg-agent control set-filter --lowcut 1 --highcut 40
+
+# Recording control
 pieeg-agent control record start
+pieeg-agent control record stop
+
+# OSC streaming (for Unity, VRChat, Max/MSP, etc.)
 pieeg-agent control osc start --host 127.0.0.1 --port 9000
-pieeg-agent control audit                            # see action log
+pieeg-agent control osc stop
+
+# Apply ADS1299 register preset
+pieeg-agent control register-preset normal
+
+# View action audit log
+pieeg-agent control audit
+pieeg-agent control audit --limit 10
 ```
 
-**Copilot with hands** (opt-in, dry-run by default):
-```bash
-pieeg-agent chat --allow-actions                    # preview only
-pieeg-agent chat --allow-actions --execute          # actually act
+**Audit log** tracks all attempts:
+```
+Audit log: ~/.pieeg-agent/audit.jsonl  (15 entries, showing 5)
+
+  2026-06-11 14:32:18  [     OK] set_filter     - 1-40 Hz applied
+  2026-06-11 14:32:45  [     OK] start_recording - data_20260611_143245.csv
+  2026-06-11 14:33:02  [COOLDOWN] start_recording - denied: 2s remaining
+  2026-06-11 14:33:15  [DRY-RUN] start_osc      - preview mode, not executed
+  2026-06-11 14:34:01  [     OK] stop_recording - 16s captured
 ```
 
-Every action passes through a gate:
-- **Allowlist** — only permitted actions can run
-- **Dry-run** — previewed, not executed (default for copilot)
-- **Cooldown** — minimum interval between executions
-- **Audit** — logged with timestamp, user, outcome
+**Use cases:**
+- **Scripting**: Automate filter changes, recording sessions
+- **Integration**: Call from Python scripts, shell pipelines
+- **Debugging**: Direct control when copilot is overkill
 
 ---
 
@@ -356,26 +600,31 @@ This prevents spurious events from noise or motion.
 
 ## ⚙️ Configuration
 
-### Interactive Setup
+### Interactive Setup Wizard
 
-When you run a command that needs an LLM provider (`web`, `chat`, `ask`) without proper configuration, you'll get an **interactive setup wizard** that guides you through:
+First-time setup is guided by an interactive wizard:
 
-1. **Provider selection** — Choose from 7 providers (cloud or local)
-2. **API key input** — Secure prompt (hidden input) for cloud providers
-3. **Save configuration** — Option to persist settings to `~/.pieeg-agent/config.json`
-
-Saved configuration is automatically loaded on subsequent runs. The wizard only appears when:
-- No saved config exists
-- No environment variables are set
-- Running in an interactive terminal (`stdin.isatty()` is true)
-
-**Manage saved configuration:**
 ```bash
-pieeg-agent config          # view current config + saved settings
-pieeg-agent config reset    # delete saved config (will prompt again)
+pieeg-agent web  # or chat, ask
 ```
 
-For non-interactive environments (CI, Docker, systemd), set environment variables directly — the wizard won't run.
+If no LLM provider is configured, you'll see:
+
+1. **Provider selection** — 7 options (Anthropic, OpenAI, Groq, Together, Ollama, LM Studio, Echo)
+2. **API key input** — Secure prompt (hidden) for cloud providers; local providers skip this
+3. **Save option** — Persist to `~/.pieeg-agent/config.json` (chmod 600)
+
+**Configuration persistence:**
+- Saved config auto-loads on next run
+- Override with environment variables (`PIEEG_LLM_PROVIDER`, `ANTHROPIC_API_KEY`)
+- Reset with `pieeg-agent config reset`
+
+**Non-interactive mode** (Docker, CI, systemd):
+```bash
+export PIEEG_LLM_PROVIDER=anthropic
+export ANTHROPIC_API_KEY=sk-ant-...
+pieeg-agent web  # skips wizard, uses env vars
+```
 
 ### Environment Variables
 
@@ -415,39 +664,78 @@ pieeg-agent chat                # uses local Llama, no key needed
 
 ## 🧪 Development & Testing
 
+### Installation Modes
+
 ```bash
-# Install with dev dependencies
+# Minimal (monitoring + analysis only)
+pip install -e .
+
+# With device control
+pip install -e ".[server]"
+
+# Full dev environment
 pip install -e ".[dev,server]"
-
-# Run tests
-pytest tests/
-
-# Test with mock signal (deterministic)
-pieeg-server --mock --lsl
-pieeg-agent monitor --seconds 10
-
-# Test with echo provider (no API key needed)
-pieeg-agent web --provider echo                    # web UI with debug mode
-pieeg-agent chat --provider echo                   # CLI chat, tool calls are real
-pieeg-agent ask --provider echo "what is my focus level?"  # triggers get_neural_state tool
-
-# Test provider without EEG stream
-python -m pieeg_agent.llm.factory --provider anthropic
 ```
 
-**Key modules:**
-- `ingest/` — LSL intake, ring buffer (no LLM dependency)
-- `perceive/` — Feature extraction, state estimation, events (pure DSP)
-- `llm/` — Provider abstraction, HTTP-only (no vendor SDKs)
-- `agent/` — Copilot, tool dispatch, conversation loop
-- `server/` — WebSocket client, action gate, audit log
+### Testing Without Hardware
 
-**Tests validate:**
-- Ring buffer handles overwrite correctly
-- Feature extraction matches known FFT results
-- Event detector hysteresis prevents flicker
-- Provider wire format (request/response, tool calling)
+```bash
+# Mock EEG stream (deterministic signal)
+pieeg-server --mock --lsl --seed 42
+
+# Validate stream throughput
+pieeg-agent ingest --seconds 10
+# Exit code 0 = no samples lost, ring never overflowed
+
+# Monitor live (no LLM needed)
+pieeg-agent monitor
+```
+
+### Testing Without API Keys
+
+```bash
+# Echo provider (keyword-based simulator)
+pieeg-agent web --provider echo                    # web UI, real tools
+pieeg-agent chat --provider echo                   # CLI chat
+pieeg-agent ask --provider echo "am I focused?"   # one-shot query
+
+# Echo provider executes REAL tool calls (get_neural_state, etc.)
+# Only the LLM reasoning is simulated via keyword matching
+```
+
+### Running Tests
+
+```bash
+pytest tests/                          # all tests
+pytest tests/test_ring.py             # specific module
+pytest -v --tb=short                   # verbose, short tracebacks
+```
+
+**Test coverage:**
+- Ring buffer overwrite logic
+- FFT feature extraction accuracy
+- Event detector hysteresis
+- Provider wire format (tool calling)
 - Gate enforcement (allowlist, cooldown, dry-run)
+- Perception cascade integration
+
+### Module Overview
+
+| Module | Purpose | Dependencies |
+|--------|---------|-------------|
+| `ingest/` | LSL intake, ring buffer | `pylsl` only |
+| `perceive/` | Feature extraction, state estimation, events | NumPy, SciPy (pure DSP) |
+| `decode/` | Pattern training, connectivity, sessions | scikit-learn |
+| `llm/` | Provider abstraction (HTTP-only, no SDKs) | stdlib `urllib` |
+| `agent/` | Copilot, tool dispatch, conversation loop | depends on above |
+| `server/` | WebSocket client, action gate, audit log | `websockets` (optional) |
+| `web/` | FastAPI backend + React/TS frontend | FastAPI, Vite |
+
+**Decoupling principles:**
+- Perception runs without LLM (works in `monitor` mode)
+- LSL intake never blocks on downstream processing
+- LLM provider is swappable (Anthropic → Ollama → LM Studio)
+- Web UI is optional (CLI works standalone)
 
 ---
 
@@ -477,123 +765,140 @@ python -m pieeg_agent.llm.factory --provider anthropic
 
 ## 📄 License
 
-MIT — see [LICENSE](LICENSE) for details.
+CC BY-NC 4.0 (Creative Commons Attribution-NonCommercial 4.0 International) — see [LICENSE](LICENSE) for details.
+
+You are free to share and adapt this work for non-commercial purposes with attribution.
 
 ---
 
 ## 🙏 Contributing
 
-Issues and PRs welcome. Please include:
-- **For bugs**: `pieeg-agent config` output, LSL stream info, error trace
-- **For features**: Use case, proposed CLI/API, why current tools don't suffice
-- **For metrics**: Citations for thresholds, validation on public datasets
-|------|--------|--------|
-| `server_status` | read sample rate, channels, filter, recording, LSL state | read-only |
-| `list_webhooks` | list configured webhook rules | read-only |
-| `set_filter` | enable/disable/retune the band-pass filter | yes |
-| `start_recording` / `stop_recording` | server-side CSV recording | yes |
-| `apply_register_preset` | ADS1299 preset (normal / short / test / temp) | yes |
-| `start_osc` / `stop_osc` | OSC output stream (e.g. to VRChat) | yes |
+We welcome contributions! Whether you're fixing bugs, adding features, or improving documentation, here's how to help:
 
-In the default `--allow-actions` mode (no `--execute`) the copilot can *reach*
-for an action but only ever previews it — you see exactly what it would do:
+### Reporting Issues
 
-```
-you > start recording
-  (consulted: start_recording)
-copilot > I held that back — this session is in dry-run mode, so I previewed
-start_recording instead of sending it. Re-run me with --execute if you want
-that to actually start the recording.
+Include the following for faster resolution:
 
-you > what's the filter set to right now?
-  (consulted: server_status)
-copilot > The band-pass filter is on. I can retune it, but only as a preview
-unless you give me --execute.
+**For bugs:**
+```bash
+pieeg-agent config          # current configuration
+pieeg-agent streams         # LSL stream discovery
+# Paste error traceback
 ```
 
-With `--execute`, the same requests run for real and the copilot reports the
-gate's actual outcome — and a repeat of the same action is refused while it's
-on cooldown:
+**For feature requests:**
+- **Use case**: What problem are you solving?
+- **Proposed API**: CLI commands or copilot interactions
+- **Why existing tools don't work**: What's missing?
 
-```
-you > start recording, then drop the band-pass to 1–30 Hz
-  (consulted: start_recording, set_filter)
-copilot > Done. Recording is running (writing a CSV on the server) and the
-band-pass is now 1–30 Hz.
+**For metric/algorithm changes:**
+- **Citations**: Papers or validated implementations
+- **Test data**: Public datasets showing improvement
+- **Scientific justification**: Why this threshold/method?
 
-you > actually, start a fresh recording
-  (consulted: start_recording)
-copilot > That was denied — start_recording is on cooldown for a couple more
-seconds to stop repeat actions firing back-to-back. Ask me again shortly.
-```
-
-Every attempt — previewed, executed or denied — is written to an audit log, so
-there's always a record of what the agent did or tried to do. By default it
-persists to `~/.pieeg-agent/audit.jsonl` (override with `--audit-log PATH` or
-`$PIEEG_AUDIT_LOG`, or turn it off with `--no-audit-log`). Read it back with:
+### Development Setup
 
 ```bash
-pieeg-agent control audit            # last 20 attempts (newest last)
-pieeg-agent control audit --limit 5  # just the last 5
+# Fork and clone
+git clone https://github.com/YOUR-USERNAME/PiEEG-agent
+cd PiEEG-agent
+
+# Install with dev dependencies
+pip install -e ".[dev,server]"
+
+# Run tests before making changes
+pytest tests/
+
+# Make your changes, add tests, verify
+pytest tests/
 ```
 
-```
-Audit log: ~/.pieeg-agent/audit.jsonl  (2 entries, showing 2)
+### Code Style
 
-  2026-06-08 11:57:47  [     OK] set_filter
-  2026-06-08 11:57:49  [DRY-RUN] reg_preset  -  dry-run: not sent to the device
-```
+- **Honest metrics**: Clearly document within-session vs generalizable claims
+- **No blocking**: LSL ingestion must never wait on LLM/network
+- **Language-sized**: Tools return events/verdicts, not voltage arrays
+- **Typed interfaces**: Use dataclasses/TypedDicts for tool contracts
+- **Decoupled layers**: Perception works without LLM, LLM works without device control
 
-`control audit` is a local file read — it never touches the server.
+### Pull Request Checklist
 
-Install the control-plane client with `pip install -e ".[server]"` (it pulls
-in `websockets`). The client is synchronous — a background reader thread that
-drops EEG data frames and demuxes the server's broadcast replies by key — so it
-matches the rest of the agent (no asyncio).
+- [ ] Tests pass (`pytest tests/`)
+- [ ] New features have tests
+- [ ] Documentation updated (README, docstrings)
+- [ ] Metrics have citations (if scientific claims)
+- [ ] No vendor SDK dependencies (use stdlib HTTP)
 
-## Configuration
+---
 
-Environment variables (all optional):
+## 📋 Appendix: Environment Variables Reference
+
+All configuration via environment variables (optional, defaults shown):
 
 | Variable | Default | Purpose |
 |----------|---------|---------|
 | `PIEEG_LSL_NAME` | `PiEEG` | LSL stream name |
 | `PIEEG_LSL_TYPE` | `EEG` | LSL stream type |
-| `PIEEG_LSL_RESOLVE_BY` | `type` | resolve by `name` or `type` |
-| `PIEEG_RING_SECONDS` | `60` | short-term memory depth |
-| `PIEEG_LLM_PROVIDER` | `anthropic` | `anthropic`/`openai`/`groq`/`together`/`ollama`/`lmstudio` |
-| `PIEEG_LLM_MODEL` | per provider | model id override |
-| `ANTHROPIC_API_KEY` | — | key for the default provider |
-| `PIEEG_WS_URL` | `ws://localhost:1616` | PiEEG-server control plane |
-| `PIEEG_WS_TOKEN` | — | control-plane auth token, if the server requires one |
-| `PIEEG_AUDIT_LOG` | `~/.pieeg-agent/audit.jsonl` | where gated actions are recorded |
+| `PIEEG_LSL_RESOLVE_BY` | `type` | Resolve by `name` or `type` |
+| `PIEEG_RING_SECONDS` | `60` | Ring buffer depth (seconds) |
+| `PIEEG_LLM_PROVIDER` | `anthropic` | LLM provider (see Supported Providers) |
+| `PIEEG_LLM_MODEL` | provider default | Model override (e.g. `gpt-4`, `llama3.2`) |
+| `ANTHROPIC_API_KEY` | — | Anthropic API key |
+| `OPENAI_API_KEY` | — | OpenAI API key |
+| `GROQ_API_KEY` | — | Groq API key |
+| `TOGETHER_API_KEY` | — | Together AI API key |
+| `PIEEG_WS_URL` | `ws://localhost:1616` | PiEEG-server WebSocket URL |
+| `PIEEG_WS_TOKEN` | — | WebSocket auth token (if server requires) |
+| `PIEEG_AUDIT_LOG` | `~/.pieeg-agent/audit.jsonl` | Action audit log path |
 
-## Layout
+---
+
+## 📂 Project Structure
 
 ```
 pieeg_agent/
-  config.py            # settings + provider registry
-  ingest/
-    ring.py            # thread-safe ring buffer (short-term memory)
-    lsl_inlet.py       # background LSL inlet thread + multi-group discovery
-  perceive/
-    features.py        # T1 sliding-FFT band powers (per channel)
-    quality.py         # per-channel signal-quality verdicts
-    state.py           # T2 smoothed NeuralState (~1 Hz)
-    events.py          # T3 debounced transitions (Schmitt + min-dwell)
-    cascade.py         # the perception thread wiring it together
-  llm/
-    provider.py        # provider-agnostic interface (the contract)
-    anthropic.py       # native Anthropic Messages API adapter
-    openai_compat.py   # OpenAI-compatible chat-completions adapter
-    factory.py         # get_provider(config) — selects an adapter by kind
-  agent/
-    tools.py           # read-only neural tools (+ Toolset / CombinedToolset)
-    actuator_tools.py  # opt-in gated control tools (the agent's hands)
-    copilot.py         # the tool-using conversational loop
-  server/
-    client.py          # synchronous WebSocket control client (reply demux)
-    gate.py            # allowlist / dry-run / cooldown + audit log
-    actions.py         # typed reads + gated actions facade
-  __main__.py          # CLI: streams · ingest · monitor · ask · chat · control · config
+  config.py              # Configuration + provider registry
+  __main__.py            # CLI entry point
+  
+  ingest/                # LSL data ingestion (no LLM dependency)
+    lsl_inlet.py         #   Background LSL thread
+    ring.py              #   Thread-safe ring buffer (60s default)
+  
+  perceive/              # Signal processing cascade (pure DSP)
+    features.py          #   T1: FFT → band powers @ 8 Hz
+    quality.py           #   Per-channel quality verdicts
+    state.py             #   T2: Focus/relax/engagement @ 1 Hz
+    events.py            #   T3: Sparse transitions (debounced)
+    artifacts.py         #   Blink/jaw/movement detection
+    cascade.py           #   Cascade orchestration thread
+  
+  decode/                # Lab notebook ML features
+    patterns.py          #   Pattern classifier training
+    classifier.py        #   L2 + group-lasso implementation
+    connectivity.py      #   Cross-channel coupling
+    session.py           #   Session capture + comparison
+    store.py             #   Pattern/session persistence
+  
+  llm/                   # LLM provider abstraction (no SDKs)
+    provider.py          #   Provider interface
+    anthropic.py         #   Anthropic Messages API
+    openai_compat.py     #   OpenAI-compatible providers
+    factory.py           #   Provider selection
+    echo.py              #   Debug/testing provider
+  
+  agent/                 # Copilot + tool dispatch
+    tools.py             #   Read-only neural tools
+    decode_tools.py      #   Pattern/connectivity/session tools
+    actuator_tools.py    #   Gated device actions
+    copilot.py           #   Conversation loop
+  
+  server/                # Device control (optional)
+    client.py            #   WebSocket client (sync)
+    gate.py              #   Safety gate + audit log
+    actions.py           #   Typed action facade
+  
+  web/                   # Web UI (optional)
+    app.py               #   FastAPI backend
+    engine.py            #   WebSocket state streaming
+    frontend/            #   Vite + React/TypeScript
 ```
