@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { marked } from "marked";
 import type { ChatMessage, Part, ToolPart } from "../hooks/useChatSocket";
 import { toast } from "./Toast";
 
@@ -31,10 +32,9 @@ function ToolChip({ part }: { part: ToolPart }) {
 
 function renderPart(p: Part, i: number) {
   if (p.kind === "text") {
+    const html = marked.parse(p.text, { async: false }) as string;
     return (
-      <div className="text" key={i}>
-        {p.text}
-      </div>
+      <div className="text" key={i} dangerouslySetInnerHTML={{ __html: html }} />
     );
   }
   return <ToolChip part={p} key={i} />;
