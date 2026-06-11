@@ -40,6 +40,72 @@ function renderPart(p: Part, i: number, msgId: string) {
   return <ToolChip part={p} key={`${msgId}-tool-${i}-${p.name}`} />;
 }
 
+// A clickable suggestion the agent surfaces mid-flow (e.g. guided training).
+// Sending the message text drives the exact same copilot turn a typed reply
+// would, so the buttons are pure convenience — the agent stays in control.
+type QuickReply = { label: string; message: string; tone?: "rest" | "active" | "finish" | "cancel" };
+
+// Derive the live pattern-training context purely from the streamed tool
+// results already in the thread (no extra backend protocol). Each training
+// turn records at most one segment, so we replay the whole conversation to
+// find: is a session open, what was recorded last, and is it ready to finish.
+function deriveTrainingActions(messages: ChatMessage[]): QuickReply[] {
+  let active = false;
+  let lastLabel: string | null = null;
+  let reps = 0;
+  let ready = false;
+  let mustFinish = false;
+
+  for (const m of messages) {
+    for (const p of m.parts) {
+      if (p.kind !== "tool") continue;
+      const r = (p.result ?? {}) as Record<string, unknown>;
+      const status = r.status as string | undefined;
+      if (p.name === "start_pattern_training") {
+        if (status === "training_started") {
+          active = true;
+          lastLabel = null;
+          reps = 0;
+          ready = false;
+          mustFinish = false;
+        }
+      } else if (p.name === "record_segment") {
+        if (status === "segment_recorded") {
+          lastLabel = (r.label as string) ?? lastLabel;
+          const totals = r.totals as { reps?: number } | undefined;
+          reps = totals?.reps ?? reps;
+          ready = Boolean(r.ready);
+          mustFinish = Boolean(r.must_finish);
+        }
+      } else if (p.name === "finish_pattern_training" || p.name === "cancel_pattern_training") {
+        active = false;
+      }
+    }
+  }
+
+  if (!active) return [];
+
+  if (mustFinish) {
+    return [
+      { label: "Finish & train detector", message: "Finish the training now and fit the detector.", tone: "finish" },
+      { label: "Cancel", message: "Cancel the pattern training.", tone: "cancel" },
+    ];
+  }
+
+  const nextLabel = lastLabel === "rest" ? "active" : "rest";
+  const actions: QuickReply[] =
+    nextLabel === "rest"
+      ? [{ label: "Record rest — I'm relaxed", message: "I'm relaxed and ready — record the rest segment now.", tone: "rest" }]
+      : [{ label: "Record active — I'm doing it", message: "I'm doing it now — record the active segment.", tone: "active" }];
+
+  if (ready || reps >= 2) {
+    actions.push({ label: "Finish & train", message: "Finish the training now and fit the detector.", tone: "finish" });
+  }
+  actions.push({ label: "Cancel", message: "Cancel the pattern training.", tone: "cancel" });
+  return actions;
+}
+
+
 function Bubble({ m }: { m: ChatMessage }) {
   const empty = m.parts.length === 0;
   
@@ -109,6 +175,10 @@ export function Chat({
     setText("");
   };
 
+  const quickReplies = deriveTrainingActions(messages);
+  const lastDone = messages.length > 0 && messages[messages.length - 1].done;
+  const showQuickReplies = quickReplies.length > 0 && !busy && lastDone && connected;
+
   return (
     <div className="chat">
       <div className="chat-thread">
@@ -132,6 +202,20 @@ export function Chat({
         )}
         <div ref={endRef} />
       </div>
+
+      {showQuickReplies && (
+        <div className="quick-replies">
+          {quickReplies.map((q) => (
+            <button
+              key={q.label}
+              className={"quick-reply" + (q.tone ? " " + q.tone : "")}
+              onClick={() => onSend(q.message)}
+            >
+              {q.label}
+            </button>
+          ))}
+        </div>
+      )}
 
       <div className="composer">
         <textarea

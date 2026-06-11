@@ -807,6 +807,57 @@ button {
   box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.3);
 }
 
+/* ── quick-reply call-to-action chips (guided training, etc.) ──────────── */
+.quick-replies {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  padding: 4px clamp(16px, 6vw, 80px) 0;
+  animation: slideIn 0.25s ease-out;
+}
+.quick-reply {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 10px 16px;
+  border-radius: 999px;
+  border: 1px solid var(--border-2);
+  background: var(--panel-2);
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+.quick-reply::before {
+  content: "";
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--accent);
+}
+.quick-reply:hover {
+  transform: translateY(-1px);
+  border-color: var(--accent);
+  box-shadow: 0 4px 14px rgba(110, 168, 254, 0.25);
+}
+.quick-reply.rest::before { background: var(--relax); }
+.quick-reply.active::before { background: var(--engage); }
+.quick-reply.finish {
+  background: linear-gradient(135deg, var(--good) 0%, #2fa572 100%);
+  color: #06140d;
+  border-color: transparent;
+}
+.quick-reply.finish::before { background: #06140d; }
+.quick-reply.finish:hover { box-shadow: 0 4px 14px rgba(62, 207, 142, 0.35); }
+.quick-reply.cancel {
+  color: var(--muted);
+  border-style: dashed;
+}
+.quick-reply.cancel::before { background: var(--faint); }
+.quick-reply.cancel:hover { border-color: var(--bad); color: var(--bad); }
+.quick-reply.cancel:hover::before { background: var(--bad); }
+
 .composer {
   display: flex;
   gap: 12px;
@@ -952,6 +1003,9 @@ button {
   margin-top: 8px;
   color: var(--warn);
   font-size: 12px;
+}
+.warn-line.ok-line {
+  color: var(--good);
 }
 
 .meter {

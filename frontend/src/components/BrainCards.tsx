@@ -64,8 +64,10 @@ export function StateCard({ state }: { state?: NeuralState }) {
               </span>
             )}
           </div>
-          {state.bad_channels && state.bad_channels.length > 0 && (
+          {state.bad_channels && state.bad_channels.length > 0 ? (
             <div className="warn-line">⚠ Check: {state.bad_channels.join(", ")}</div>
+          ) : (
+            <div className="warn-line ok-line">✓ All channels clean</div>
           )}
         </>
       )}
