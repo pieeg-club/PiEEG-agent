@@ -8,7 +8,7 @@ version = "0.1.0"
 description = "Natural language EEG lab notebook."
 readme = "README.md"
 requires-python = ">=3.10"
-license = {text = "MIT"}
+license = {text = "CC BY-NC 4.0"}
 authors = [
     {name = "PiEEG Community"},
 ]
@@ -22,7 +22,7 @@ classifiers = [
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
-    "License :: OSI Approved :: MIT License",
+    "License :: CC BY-NC 4.0",
     "Environment :: Console",
 ]
 dependencies = [
