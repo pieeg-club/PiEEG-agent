@@ -26,6 +26,7 @@ class FakeSenses:
             "get_band_powers": {"relative": {"Alpha": 0.3}, "dominant": "Alpha"},
             "get_channel_quality": {"overall": 0.9, "channels": []},
             "get_recent_events": {"count": 0, "events": []},
+            "get_cascade_stats": {"ticks": 100, "features": 50, "states": 10, "events": 0, "last_summary": ""},
         }[name]
 
 
