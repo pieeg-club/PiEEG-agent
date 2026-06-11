@@ -799,6 +799,7 @@ def _start_copilot(args):
         CombinedToolset,
         Copilot,
         DecodeTools,
+        DocumentationTools,
         NeuralTools,
     )
     from .llm import ProviderError, get_provider
@@ -927,6 +928,7 @@ def _start_copilot(args):
     cascade = PerceptionCascade(inlet, CascadeConfig(mains_hz=args.mains))
     senses = NeuralTools(cascade)
     decode = DecodeTools(cascade)
+    docs = DocumentationTools()
     # Drive the live pattern bank (and any in-progress training capture) from
     # every cascade frame. Wired here because cascade and decoder reference
     # each other.
@@ -940,7 +942,7 @@ def _start_copilot(args):
         _wait_for_state(cascade, args.warmup)
 
     if actuator is not None:
-        tools = CombinedToolset(senses, decode, actuator)
+        tools = CombinedToolset(senses, decode, docs, actuator)
         copilot = Copilot(provider, tools, system=ACTUATOR_SYSTEM_PROMPT)
         # Build actions for direct web control (reuses the same client/gate)
         from .server import ActionGate, ActionPolicy, ServerActions
@@ -950,7 +952,7 @@ def _start_copilot(args):
         )
         actions = ServerActions(client, gate)
     else:
-        tools = CombinedToolset(senses, decode)
+        tools = CombinedToolset(senses, decode, docs)
         copilot = Copilot(provider, tools, system=SYSTEM_PROMPT)
         actions = None
     return _CopilotSession(
