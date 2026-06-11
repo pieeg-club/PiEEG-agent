@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "pieeg-agent"
 version = "0.1.0"
-description = "Provider-agnostic LLM agent that perceives live PiEEG brain activity over Lab Streaming Layer and acts through PiEEG-server."
+description = "Natural language EEG lab notebook."
 readme = "README.md"
 requires-python = ">=3.10"
 license = {text = "MIT"}
