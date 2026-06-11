@@ -1,6 +1,4 @@
 <div align="center">
-<img width="350" alt="icon" src="https://github.com/user-attachments/assets/267df4c6-b7f6-4a96-b985-1b7720d10050" />
-
   
 # PiEEG-agent
 
