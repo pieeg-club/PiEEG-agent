@@ -186,12 +186,26 @@ export function useChatSocket(logs?: ReturnType<typeof useLogsCapture>) {
           });
           break;
         case "done":
-          mutateLast((m) => ({
-            ...m,
-            done: true,
-            usage: ev.usage,
-            iterations: ev.iterations,
-          }));
+          mutateLast((m) => {
+            // Add any final text that wasn't streamed as tokens
+            if (ev.text && ev.text.trim()) {
+              const last = m.parts[m.parts.length - 1];
+              if (last && last.kind === "text") {
+                m.parts[m.parts.length - 1] = {
+                  kind: "text",
+                  text: last.text + ev.text,
+                };
+              } else {
+                m.parts.push({ kind: "text", text: ev.text });
+              }
+            }
+            return {
+              ...m,
+              done: true,
+              usage: ev.usage,
+              iterations: ev.iterations,
+            };
+          });
           setBusy(false);
           break;
         case "error":
