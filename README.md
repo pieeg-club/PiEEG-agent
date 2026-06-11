@@ -1,5 +1,13 @@
 # PiEEG-agent
 
+[![Python](https://img.shields.io/badge/python-3.10%2B-blue)](https://www.python.org/)
+[![License: MIT](https://img.shields.io/github/license/pieeg-club/PiEEG-agent)](LICENSE)
+[![LSL](https://img.shields.io/badge/LSL-compatible-green?logo=data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMjQiIGhlaWdodD0iMjQiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+PHBhdGggZD0iTTEyIDJhMTAgMTAgMCAxIDAgMCwyMCAxMCAxMCAwIDAgMCAwLTIwem0wIDJhOCA4IDAgMSAxIDAgMTYgOCA4IDAgMCAxIDAtMTZ6bTAgM2ExIDEgMCAwIDAtMSAxdjVhMSAxIDAgMCAwIDIgMFY4YTEgMSAwIDAgMC0xLTF6bTAgOWExIDEgMCAxIDAgMCAyIDEgMSAwIDAgMCAwLTJ6IiBmaWxsPSIjZmZmIi8+PC9zdmc+)](https://labstreaminglayer.org/)
+[![Platform](https://img.shields.io/badge/platform-PiEEG%20|%20Any%20LSL%20Device-c51a4a)](https://pieeg.com)
+[![LLM](https://img.shields.io/badge/LLM-Anthropic%20|%20OpenAI%20|%20Groq%20|%20Ollama%20|%20More-8A2BE2)](https://github.com/pieeg-club/PiEEG-agent)
+[![Discord](https://img.shields.io/discord/1059637443548987462?color=5865F2&logo=discord&logoColor=white&label=Discord)](https://discord.gg/neJ45FR6Sv)
+[![Docs](https://img.shields.io/badge/docs-pieeg.com-blue?logo=vercel&logoColor=white)](https://docs.pieeg.com)
+
 **Natural language EEG lab notebook.** Train pattern classifiers, analyze connectivity, compare sessions — all by talking to an AI copilot that reads your live brain signals.
 
 Reads from any [Lab Streaming Layer](https://labstreaminglayer.org) (LSL) EEG source. Optional control plane for [PiEEG](https://pieeg.com) hardware. Works with synthetic signal for development.
