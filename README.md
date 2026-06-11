@@ -1,6 +1,11 @@
+<div align="center">
+<img width="350" alt="icon" src="https://github.com/user-attachments/assets/267df4c6-b7f6-4a96-b985-1b7720d10050" />
+
+  
 # PiEEG-agent
 
 
+[![Test](https://github.com/pieeg-club/PiEEG-agent/actions/workflows/test.yml/badge.svg)](https://github.com/pieeg-club/PiEEG-agent/actions/workflows/test.yml)
 [![Python](https://img.shields.io/badge/python-3.10%2B-blue)](https://www.python.org/)
 [![License: MIT](https://img.shields.io/github/license/pieeg-club/PiEEG-agent)](LICENSE)
 [![LSL](https://img.shields.io/badge/LSL-compatible-green?logo=data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMjQiIGhlaWdodD0iMjQiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+PHBhdGggZD0iTTEyIDJhMTAgMTAgMCAxIDAgMCwyMCAxMCAxMCAwIDAgMCAwLTIwem0wIDJhOCA4IDAgMSAxIDAgMTYgOCA4IDAgMCAxIDAtMTZ6bTAgM2ExIDEgMCAwIDAtMSAxdjVhMSAxIDAgMCAwIDIgMFY4YTEgMSAwIDAgMC0xLTF6bTAgOWExIDEgMCAxIDAgMCAyIDEgMSAwIDAgMCAwLTJ6IiBmaWxsPSIjZmZmIi8+PC9zdmc+)](https://labstreaminglayer.org/)
@@ -9,15 +14,14 @@
 [![Discord](https://img.shields.io/discord/1059637443548987462?color=5865F2&logo=discord&logoColor=white&label=Discord)](https://discord.gg/neJ45FR6Sv)
 [![Docs](https://img.shields.io/badge/docs-pieeg.com-blue?logo=vercel&logoColor=white)](https://docs.pieeg.com)
 
+
 **Natural language EEG lab notebook.** Train pattern classifiers, analyze connectivity, compare sessions — all by talking to an AI copilot that reads your live brain signals.
-
-
 
 <img width="1918" height="962" alt="image" src="https://github.com/user-attachments/assets/2b643271-4904-4d37-a149-7f8c91163528" />
 
 
 
-
+</div>
 ---
 
 ## 📦 Installation
