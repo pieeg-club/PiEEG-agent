@@ -53,7 +53,7 @@ function Bubble({ m }: { m: ChatMessage }) {
 
   return (
     <div className={"msg " + m.role}>
-      <div className="avatar">{m.role === "user" ? "You" : "◉"}</div>
+      <div className="avatar">{m.role === "user" ? "You" : "Agent"}</div>
       <div className={"bubble" + (m.error ? " error" : "")}>
         {m.parts.map(renderPart)}
         {m.role === "assistant" && empty && !m.done && (
@@ -114,7 +114,6 @@ export function Chat({
       <div className="chat-thread">
         {messages.length === 0 ? (
           <div className="welcome">
-            <div className="welcome-mark">◉</div>
             <h1>Talk to your brain</h1>
             <p>
               A live EEG copilot. Ask about your signal, frequency bands and

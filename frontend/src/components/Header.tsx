@@ -18,7 +18,6 @@ export function Header({
   return (
     <header className="app-header">
       <div className="brand">
-        <span className="brand-mark">◉</span>
         <span className="brand-name">PiEEG</span>
         <span className="brand-sub">Agent</span>
       </div>
