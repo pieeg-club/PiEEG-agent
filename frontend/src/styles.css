@@ -1876,6 +1876,64 @@ button {
   color: var(--accent-2);
 }
 
+.settings-note.success {
+  background: rgba(62, 207, 142, 0.1);
+  border: 1px solid rgba(62, 207, 142, 0.3);
+  color: var(--good);
+}
+
+.chrome-ai-status {
+  padding: var(--space-md);
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+
+.chrome-ai-status.available {
+  background: rgba(94, 234, 212, 0.05);
+  border-color: rgba(94, 234, 212, 0.2);
+}
+
+.chrome-ai-status.unavailable {
+  background: rgba(139, 147, 167, 0.05);
+  border-color: var(--border);
+}
+
+.status-indicator {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  margin-bottom: var(--space-xs);
+}
+
+.status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.status-dot.ready {
+  background: var(--good);
+  box-shadow: 0 0 8px rgba(62, 207, 142, 0.4);
+}
+
+.status-dot.download-needed {
+  background: var(--warn);
+  box-shadow: 0 0 8px rgba(245, 177, 61, 0.4);
+}
+
+.status-dot.unavailable,
+.status-dot.unknown {
+  background: var(--muted);
+}
+
+.status-text {
+  font-size: 13px;
+  color: var(--text);
+  line-height: 1.4;
+}
+
 .settings-message {
   margin-top: var(--space-lg);
   padding: var(--space-md);

@@ -10,6 +10,7 @@ import {
   setCurrentConversationId,
   clearCurrentConversationId,
 } from "../util/conversations";
+import { ChromeAI } from "../util/chromeai";
 
 export type ToolPart = {
   kind: "tool";
@@ -142,6 +143,84 @@ export function useChatSocket(logs?: ReturnType<typeof useLogsCapture>) {
     []
   );
 
+  // Handle rate limit errors by falling back to Chrome AI if available
+  const handleRateLimitFallback = useCallback(async (errorDetail: string) => {
+    const available = await ChromeAI.isAvailable();
+    
+    if (!available) {
+      // Chrome AI not available, show error
+      mutateLast((m) => {
+        m.parts.push({ 
+          kind: "text", 
+          text: `\n\n⚠️ ${errorDetail}\n\n**Tip**: Switch to a local provider (Ollama/LM Studio) or enable Chrome AI for offline fallback.` 
+        });
+        return { ...m, done: true, error: true };
+      });
+      setBusy(false);
+      return;
+    }
+
+    // Get the user's last message
+    const userMsg = messages.length >= 2 ? messages[messages.length - 2] : null;
+    if (!userMsg || userMsg.role !== "user") {
+      mutateLast((m) => {
+        m.parts.push({ kind: "text", text: `\n\n⚠️ ${errorDetail}` });
+        return { ...m, done: true, error: true };
+      });
+      setBusy(false);
+      return;
+    }
+
+    const userText = userMsg.parts
+      .filter((p): p is TextPart => p.kind === "text")
+      .map(p => p.text)
+      .join(" ");
+
+    // Show fallback notice
+    mutateLast((m) => {
+      m.parts.push({ 
+        kind: "text", 
+        text: `_Backend rate-limited — using Chrome AI fallback (Gemini Nano)…_\n\n` 
+      });
+      return m;
+    });
+
+    try {
+      const chromeAI = new ChromeAI();
+      const context = `The user is monitoring their EEG in real-time. Recent state: ${messages.length} messages in conversation.`;
+      const prompt = `${context}\n\nUser: ${userText}`;
+      
+      // Stream the response
+      for await (const chunk of chromeAI.promptStream(prompt)) {
+        mutateLast((m) => {
+          const last = m.parts[m.parts.length - 1];
+          if (last && last.kind === "text") {
+            m.parts[m.parts.length - 1] = {
+              kind: "text",
+              text: last.text + chunk,
+            };
+          } else {
+            m.parts.push({ kind: "text", text: chunk });
+          }
+          return m;
+        });
+      }
+
+      mutateLast((m) => ({ ...m, done: true }));
+      chromeAI.destroy();
+    } catch (err) {
+      mutateLast((m) => {
+        m.parts.push({ 
+          kind: "text", 
+          text: `\n\n⚠️ Chrome AI fallback failed: ${err}` 
+        });
+        return { ...m, done: true, error: true };
+      });
+    } finally {
+      setBusy(false);
+    }
+  }, [messages, mutateLast]);
+
   const onEvent = useCallback(
     (ev: ChatWireEvent) => {
       // Log the event if logging is enabled
@@ -209,11 +288,17 @@ export function useChatSocket(logs?: ReturnType<typeof useLogsCapture>) {
           setBusy(false);
           break;
         case "error":
-          mutateLast((m) => {
-            m.parts.push({ kind: "text", text: `\n\n⚠️ ${ev.detail}` });
-            return { ...m, done: true, error: true };
-          });
-          setBusy(false);
+          // Check if it's a rate limit error and Chrome AI is available
+          const isRateLimit = ev.detail?.toLowerCase().includes("rate limit");
+          if (isRateLimit) {
+            handleRateLimitFallback(ev.detail);
+          } else {
+            mutateLast((m) => {
+              m.parts.push({ kind: "text", text: `\n\n⚠️ ${ev.detail}` });
+              return { ...m, done: true, error: true };
+            });
+            setBusy(false);
+          }
           break;
         case "reset":
           break;

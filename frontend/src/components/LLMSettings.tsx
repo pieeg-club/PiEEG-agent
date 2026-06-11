@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import type { Info } from "../types";
+import { ChromeAI } from "../util/chromeai";
 
 const PROVIDERS = [
   { id: "anthropic", name: "Anthropic", requiresKey: true },
@@ -36,9 +37,19 @@ export function LLMSettings({ info, onClose }: LLMSettingsProps) {
   const [apiKey, setApiKey] = useState("");
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
+  const [chromeAIStatus, setChromeAIStatus] = useState<{
+    available: boolean;
+    status: string;
+    message: string;
+  } | null>(null);
 
   const selectedProvider = PROVIDERS.find((p) => p.id === provider);
   const availableModels = MODELS[provider] || [];
+
+  // Check Chrome AI availability on mount
+  useEffect(() => {
+    ChromeAI.getStatus().then(setChromeAIStatus);
+  }, []);
 
   const handleSave = async () => {
     setSaving(true);
@@ -145,6 +156,39 @@ export function LLMSettings({ info, onClose }: LLMSettingsProps) {
               />
             )}
           </div>
+
+          {chromeAIStatus && (
+            <div className="settings-section">
+              <label className="settings-label">
+                Chrome AI Fallback
+                <span className="settings-hint">
+                  Offline fallback when backend is rate-limited
+                </span>
+              </label>
+              <div className={`chrome-ai-status ${chromeAIStatus.available ? "available" : "unavailable"}`}>
+                <div className="status-indicator">
+                  <span className={`status-dot ${chromeAIStatus.status}`} />
+                  <span className="status-text">{chromeAIStatus.message}</span>
+                </div>
+                {!chromeAIStatus.available && chromeAIStatus.status === "unavailable" && (
+                  <div className="settings-note">
+                    💡 Enable Chrome AI: Open <code>chrome://flags/#prompt-api-for-gemini-nano</code>,
+                    set to "Enabled", and restart Chrome. Requires Chrome 127+ on supported devices.
+                  </div>
+                )}
+                {chromeAIStatus.status === "download-needed" && (
+                  <div className="settings-note">
+                    ✨ Model will download automatically on first fallback use (~1.5 GB)
+                  </div>
+                )}
+                {chromeAIStatus.available && chromeAIStatus.status === "ready" && (
+                  <div className="settings-note success">
+                    ✅ Chrome AI will automatically respond when backend is rate-limited
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
 
           {selectedProvider?.requiresKey && (
             <div className="settings-section">
