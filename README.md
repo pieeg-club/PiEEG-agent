@@ -22,7 +22,7 @@ Reads from any [Lab Streaming Layer](https://labstreaminglayer.org) (LSL) EEG so
 # Terminal 1: Start PiEEG server with LSL streaming
 pieeg-server --lsl
 
-# Terminal 2: Install agent and launch web interface
+# Terminal 2: Install agent and launch web interface 
 pip install -e ".[server]"  # includes control plane for device actions
 pieeg-agent web --allow-actions --execute
 ```
