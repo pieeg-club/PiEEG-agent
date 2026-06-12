@@ -23,10 +23,12 @@ from __future__ import annotations
 
 import json
 import logging
+import time
 from dataclasses import dataclass, field
 from typing import Any, Generator, Iterator, Literal
 
 from ..llm.provider import LLMProvider, LLMResponse, Message, Usage
+from .context import ContextManager, should_compress_tool_result, compress_session_payload
 from .tools import Toolset
 
 logger = logging.getLogger("pieeg.agent.copilot")
@@ -204,6 +206,8 @@ class Copilot:
         max_tokens: int = 1024,
         temperature: float = 0.0,
         max_tool_iters: int = 10,
+        context_manager: ContextManager | None = None,
+        min_request_interval: float = 0.5,
     ):
         self._provider = provider
         self._tools = tools
@@ -212,11 +216,15 @@ class Copilot:
         self._temperature = temperature
         self._max_tool_iters = max_tool_iters
         self._history: list[Message] = []
+        self._context_manager = context_manager or ContextManager()
+        self._min_request_interval = min_request_interval
+        self._last_request_time: float = 0.0
 
     # ── conversation surface ─────────────────────────────────────────────
     def reset(self) -> None:
         """Forget the conversation so far (tools/provider are kept)."""
         self._history.clear()
+        self._context_manager.reset()
 
     @property
     def history(self) -> list[Message]:
@@ -250,6 +258,17 @@ class Copilot:
         what :meth:`ask` would have returned.
         """
         self._history.append(Message(role="user", content=question))
+        
+        # Check if compression is needed before starting the tool loop
+        if self._context_manager.should_compress(self._history):
+            compressed, stats = self._context_manager.compress(self._history)
+            self._history = compressed
+            logger.info(
+                "Compressed conversation history: %d → %d tokens (%.1f%% reduction)",
+                stats.original_tokens,
+                stats.compressed_tokens,
+                (1 - stats.compression_ratio) * 100,
+            )
 
         total = Usage()
         used_tools: list[str] = []
@@ -328,13 +347,24 @@ class Copilot:
                 if call.name == "record_segment" and isinstance(result, dict) \
                         and "action" in result:
                     logger.info("Training guidance: %s", result["action"])
+                
+                # Compress large payloads before storing in history
+                result_for_history = result
+                if should_compress_tool_result(call.name, result):
+                    result_for_history = compress_session_payload(result)
+                    logger.debug(
+                        "Compressed %s result: %d → %d chars",
+                        call.name,
+                        len(json.dumps(result)),
+                        len(json.dumps(result_for_history)),
+                    )
 
                 yield CopilotEvent(type="tool_result", name=call.name, result=result)
                 self._history.append(
                     Message(
                         role="tool",
                         tool_call_id=call.id,
-                        content=json.dumps(result),
+                        content=json.dumps(result_for_history),
                     )
                 )
 
@@ -360,6 +390,16 @@ class Copilot:
         Returns (via ``StopIteration.value``, i.e. ``yield from``) the final
         assembled :class:`LLMResponse` for the caller to act on.
         """
+        # Rate limiting: ensure minimum interval between API requests
+        if self._min_request_interval > 0:
+            now = time.time()
+            elapsed = now - self._last_request_time
+            if elapsed < self._min_request_interval:
+                sleep_time = self._min_request_interval - elapsed
+                logger.debug(f"Rate limiting: sleeping {sleep_time:.2f}s")
+                time.sleep(sleep_time)
+            self._last_request_time = time.time()
+        
         response = LLMResponse()
         for event in self._provider.stream_complete(
             system=self._system,
