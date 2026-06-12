@@ -93,6 +93,9 @@ class AnthropicProvider(LLMProvider):
         max_tokens: int = 1024,
         temperature: float = 0.0,
     ) -> Iterator[StreamEvent]:
+        import logging
+        logger = logging.getLogger("pieeg.llm.anthropic")
+        
         payload: dict = {
             "model": self.model,
             "max_tokens": max_tokens,
@@ -104,6 +107,10 @@ class AnthropicProvider(LLMProvider):
             payload["system"] = system
         if tools:
             payload["tools"] = [_encode_tool(t) for t in tools]
+            logger.info(f"Sending {len(tools)} tools to Anthropic API")
+            logger.debug(f"Tool names: {[t.name for t in tools]}")
+        else:
+            logger.warning("⚠️  NO TOOLS being sent to Anthropic API!")
 
         events = post_sse(
             self._url,

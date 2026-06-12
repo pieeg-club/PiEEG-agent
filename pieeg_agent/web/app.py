@@ -128,6 +128,21 @@ def create_app(
         status = 404 if "error" in result else 200
         return JSONResponse(result, status_code=status)
 
+    # ── Notebooks ─────────────────────────────────────────────────────────
+    @app.get("/api/notebook")
+    async def get_notebook(path: str):
+        """Read a Jupyter notebook structure and outputs."""
+        result = await run_in_threadpool(engine.read_notebook, path)
+        status = 404 if "error" in result else 200
+        return JSONResponse(result, status_code=status)
+
+    @app.get("/api/notebooks")
+    async def list_notebooks(path: str = ".", recursive: bool = False):
+        """List all Jupyter notebooks in a directory."""
+        result = await run_in_threadpool(engine.list_notebooks, path, recursive)
+        status = 404 if "error" in result else 200
+        return JSONResponse(result, status_code=status)
+
     # ── LSL streams discovery ─────────────────────────────────────────────
     @app.get("/api/streams")
     async def streams(wait: float = 2.0) -> dict:

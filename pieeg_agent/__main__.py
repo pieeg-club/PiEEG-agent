@@ -781,6 +781,7 @@ class _CopilotSession:
     decode: object
     cfg: object
     actions: object = None  # ServerActions when --allow-actions is set
+    utility: object = None  # UtilityTools for file/notebook operations
 
 
 def _start_copilot(args) -> _CopilotSession | None:
@@ -971,7 +972,7 @@ def _start_copilot(args) -> _CopilotSession | None:
         web = WebTools()
         utility = UtilityTools([senses, decode, docs, actuator, web, utility], session_metadata)
         tools = CombinedToolset(senses, decode, docs, actuator, web, utility)
-        copilot = Copilot(provider, tools, system=ACTUATOR_SYSTEM_PROMPT, fallback_provider=fallback_provider)
+        copilot = Copilot(provider, tools, system=ACTUATOR_SYSTEM_PROMPT, fallback_provider=fallback_provider, max_tokens=4096)
         # Build actions for direct web control (reuses the same client/gate)
         from .server import ActionGate, ActionPolicy, ServerActions
         gate = ActionGate(
@@ -984,7 +985,7 @@ def _start_copilot(args) -> _CopilotSession | None:
         web = WebTools()
         utility = UtilityTools([senses, decode, docs, web, utility], session_metadata)
         tools = CombinedToolset(senses, decode, docs, web, utility)
-        copilot = Copilot(provider, tools, system=SYSTEM_PROMPT, fallback_provider=fallback_provider)
+        copilot = Copilot(provider, tools, system=SYSTEM_PROMPT, fallback_provider=fallback_provider, max_tokens=4096)
         actions = None
     return _CopilotSession(
         copilot=copilot,
@@ -995,6 +996,7 @@ def _start_copilot(args) -> _CopilotSession | None:
         decode=decode,
         cfg=cfg,
         actions=actions,
+        utility=utility,
     )
 
 
@@ -1196,6 +1198,7 @@ def cmd_web(args) -> int:
         decode=started.decode,
         info=info,
         actions=started.actions,
+        utility=started.utility,
     )
     static_dir = args.static_dir or _default_static_dir()
     app = create_app(engine, static_dir=static_dir)

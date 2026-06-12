@@ -179,25 +179,35 @@ class UtilityTools:
         self._add(Tool(
             _spec(
                 "create_notebook",
-                "Create a new Jupyter notebook with specified cells. Returns the "
-                "path to the created .ipynb file.",
+                "Create a new Jupyter notebook file with specified cells (code and/or "
+                "markdown). Use this when the user asks you to create a notebook, plot "
+                "data, analyze EEG, or make visualizations. The notebook will automatically "
+                "include session metadata (stream name, channels, sampling rate). Returns "
+                "the path to the created .ipynb file. After creating, you can optionally "
+                "call run_notebook to execute it and get outputs.",
                 {
                     "path": {
                         "type": "string",
-                        "description": "Path for the new notebook (e.g., 'analysis.ipynb').",
+                        "description": "Path for the new notebook file (e.g., 'eeg_analysis.ipynb'). "
+                                       "Use descriptive names based on the analysis purpose.",
                     },
                     "cells": {
                         "type": "array",
-                        "description": "Array of cell objects with 'type' (code/markdown) "
-                                       "and 'source' (cell content).",
+                        "description": "Array of cell objects. Each cell must have 'type' (either 'code' "
+                                       "for Python code or 'markdown' for formatted text) and 'source' "
+                                       "(the cell content as a string).",
                         "items": {
                             "type": "object",
                             "properties": {
                                 "type": {
                                     "type": "string",
                                     "enum": ["code", "markdown"],
+                                    "description": "'code' for Python or 'markdown' for text/headings",
                                 },
-                                "source": {"type": "string"},
+                                "source": {
+                                    "type": "string", 
+                                    "description": "Cell content (Python code or markdown text)"
+                                },
                             },
                             "required": ["type", "source"],
                         },
@@ -242,6 +252,24 @@ class UtilityTools:
                 required=["path"],
             ),
             self._read_notebook,
+        ))
+
+        self._add(Tool(
+            _spec(
+                "list_notebooks",
+                "List all Jupyter notebooks in a directory. Returns paths and metadata.",
+                {
+                    "path": {
+                        "type": "string",
+                        "description": "Directory path to search (default: current directory).",
+                    },
+                    "recursive": {
+                        "type": "boolean",
+                        "description": "Search subdirectories (default: false).",
+                    },
+                },
+            ),
+            self._list_notebooks,
         ))
 
     # ── handlers ────────────────────────────────────────────────────────
@@ -587,3 +615,35 @@ class UtilityTools:
             }
         except Exception as e:
             return {"error": f"Failed to read notebook: {e}"}
+
+    def _list_notebooks(self, args: dict) -> dict:
+        """List all Jupyter notebooks in a directory."""
+        path = Path(args.get("path", ".")).expanduser()
+        recursive = args.get("recursive", False)
+        
+        if not path.exists():
+            return {"error": f"Directory not found: {path}"}
+        
+        if not path.is_dir():
+            return {"error": f"Not a directory: {path}"}
+        
+        try:
+            pattern = "**/*.ipynb" if recursive else "*.ipynb"
+            notebooks = list(path.glob(pattern))
+            
+            result_list = []
+            for nb_path in sorted(notebooks):
+                stat = nb_path.stat()
+                result_list.append({
+                    "path": str(nb_path),
+                    "name": nb_path.name,
+                    "size": stat.st_size,
+                    "modified": stat.st_mtime,
+                })
+            
+            return {
+                "count": len(result_list),
+                "notebooks": result_list,
+            }
+        except Exception as e:
+            return {"error": f"Failed to list notebooks: {e}"}
