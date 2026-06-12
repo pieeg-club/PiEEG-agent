@@ -185,6 +185,21 @@ export function useChatSocket(logs?: ReturnType<typeof useLogsCapture>) {
             return m;
           });
           break;
+        case "model_switch":
+          mutateLast((m) => {
+            const notice = `\n\n⚠️ **Switched to fallback model:** ${ev.text}\n_${ev.reason}_\n\n`;
+            const last = m.parts[m.parts.length - 1];
+            if (last && last.kind === "text") {
+              m.parts[m.parts.length - 1] = {
+                kind: "text",
+                text: last.text + notice,
+              };
+            } else {
+              m.parts.push({ kind: "text", text: notice });
+            }
+            return m;
+          });
+          break;
         case "done":
           mutateLast((m) => {
             // Add any final text that wasn't streamed as tokens

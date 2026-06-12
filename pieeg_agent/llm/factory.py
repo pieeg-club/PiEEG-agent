@@ -14,11 +14,15 @@ only failure modes are a missing key or an unknown ``kind``, both reported as
 
 from __future__ import annotations
 
+import logging
+
 from ..config import PROVIDERS, AgentConfig
 from .anthropic import AnthropicProvider
 from .echo import EchoProvider
 from .openai_compat import OpenAICompatProvider
 from .provider import LLMProvider
+
+logger = logging.getLogger("pieeg.llm.factory")
 
 
 class ProviderError(RuntimeError):
@@ -70,3 +74,69 @@ def get_provider(config: AgentConfig, *, timeout: float = 60.0) -> LLMProvider:
     raise ProviderError(
         f"Provider {config.provider!r} has unsupported kind {kind!r}."
     )
+
+
+def get_fallback_provider(config: AgentConfig, *, timeout: float = 60.0) -> LLMProvider | None:
+    """Build the fallback LLM provider if configured, otherwise returns None.
+    
+    The fallback provider is used for resilience when the primary provider hits
+    rate limits or errors. It's optional and configured via PIEEG_LLM_FALLBACK_PROVIDER.
+    """
+    if not config.fallback_provider:
+        return None
+    
+    spec = PROVIDERS.get(config.fallback_provider)
+    if not spec:
+        # Don't fail if fallback is misconfigured; log and continue without it.
+        logger.warning(
+            "Unknown fallback provider %r — continuing without fallback.",
+            config.fallback_provider,
+        )
+        return None
+    
+    kind = spec.get("kind")
+    
+    # Check for API key if needed
+    needs_key = bool(spec.get("env_key"))
+    if needs_key and not config.fallback_api_key:
+        # Don't fail, just skip fallback — log so a missing key is diagnosable.
+        logger.warning(
+            "Fallback provider %r is configured but has no API key — "
+            "continuing without fallback.",
+            config.fallback_provider,
+        )
+        return None
+    
+    try:
+        if kind == "anthropic":
+            return AnthropicProvider(
+                api_key=config.fallback_api_key,
+                model=config.fallback_model,
+                base_url=config.fallback_base_url,
+                timeout=timeout,
+            )
+        if kind == "openai":
+            return OpenAICompatProvider(
+                api_key=config.fallback_api_key,
+                model=config.fallback_model,
+                base_url=config.fallback_base_url,
+                timeout=timeout,
+            )
+        if kind == "echo":
+            return EchoProvider(
+                api_key="",
+                model=config.fallback_model,
+                base_url="",
+                timeout=0.0,
+            )
+    except Exception:
+        # Don't fail if fallback provider can't be created, but log for debugging.
+        logger.exception(
+            "Failed to create fallback provider %r (model=%r) — "
+            "continuing without fallback.",
+            config.fallback_provider,
+            config.fallback_model,
+        )
+        return None
+    
+    return None

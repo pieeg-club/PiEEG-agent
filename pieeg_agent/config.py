@@ -86,6 +86,46 @@ PROVIDERS: dict[str, dict] = {
 
 DEFAULT_PROVIDER = "anthropic"
 
+# ── Automatic fallback model mapping ───────────────────────────────────────
+#
+# When rate limits or errors occur, the system can automatically fall back to
+# a smaller/cheaper model from the same provider. This mapping defines the
+# automatic fallback for common models. Users can override with env vars.
+#
+# Keyed by ``provider`` first, then by primary ``model``. Keying by provider
+# avoids selecting an invalid fallback when the same model string is used with
+# a different provider (e.g. an OpenAI model name configured against Together).
+
+AUTO_FALLBACK_MODELS: dict[str, dict[str, str]] = {
+    # Anthropic: Sonnet/Opus → Haiku
+    "anthropic": {
+        "claude-sonnet-4-20250514": "claude-3-5-haiku-20241022",
+        "claude-opus-4-20250514": "claude-3-5-haiku-20241022",
+        "claude-3-5-sonnet-20241022": "claude-3-5-haiku-20241022",
+        "claude-3-opus-20240229": "claude-3-haiku-20240307",
+        "claude-3-sonnet-20240229": "claude-3-haiku-20240307",
+    },
+    # OpenAI: GPT-4 → GPT-4o-mini
+    "openai": {
+        "gpt-4o": "gpt-4o-mini",
+        "gpt-4-turbo": "gpt-4o-mini",
+        "gpt-4": "gpt-4o-mini",
+        "o1": "gpt-4o-mini",
+        "o1-mini": "gpt-4o-mini",
+    },
+    # Groq: 70B → 8B
+    "groq": {
+        "llama-3.3-70b-versatile": "llama-3.1-8b-instant",
+        "llama-3.1-70b-versatile": "llama-3.1-8b-instant",
+        "mixtral-8x7b-32768": "llama-3.1-8b-instant",
+    },
+    # Together AI: 70B → 8B
+    "together": {
+        "meta-llama/Llama-3.3-70B-Instruct-Turbo": "meta-llama/Llama-3.1-8B-Instruct-Turbo",
+        "meta-llama/Llama-3.1-70B-Instruct-Turbo": "meta-llama/Llama-3.1-8B-Instruct-Turbo",
+    },
+}
+
 
 # ── Runtime configuration ──────────────────────────────────────────────────
 
@@ -106,6 +146,12 @@ class AgentConfig:
     model: str = ""                       # resolved from registry if blank
     base_url: str = ""                    # resolved from registry if blank
     api_key: str = field(default="", repr=False)  # never printed
+    
+    # ── Fallback LLM (optional resilience) ──────────────────────────────
+    fallback_provider: str = ""           # e.g., "groq" or "ollama"
+    fallback_model: str = ""              # resolved from registry if blank
+    fallback_base_url: str = ""           # resolved from registry if blank
+    fallback_api_key: str = field(default="", repr=False)
 
     # ── Action (PiEEG-server control plane; used from Phase 3) ──────────
     ws_url: str = "ws://localhost:1616"
@@ -120,6 +166,7 @@ class AgentConfig:
           PIEEG_LSL_NAME, PIEEG_LSL_TYPE, PIEEG_LSL_RESOLVE_BY,
           PIEEG_LSL_RESOLVE_TIMEOUT, PIEEG_RING_SECONDS,
           PIEEG_LLM_PROVIDER, PIEEG_LLM_MODEL,
+          PIEEG_LLM_FALLBACK_PROVIDER, PIEEG_LLM_FALLBACK_MODEL,
           PIEEG_WS_URL, PIEEG_DASHBOARD_URL,
           plus the selected provider's API-key variable (e.g. ANTHROPIC_API_KEY).
 
@@ -136,6 +183,8 @@ class AgentConfig:
             ring_seconds=_as_float(g("PIEEG_RING_SECONDS"), 60.0),
             provider=g("PIEEG_LLM_PROVIDER", DEFAULT_PROVIDER),
             model=g("PIEEG_LLM_MODEL", ""),
+            fallback_provider=g("PIEEG_LLM_FALLBACK_PROVIDER", ""),
+            fallback_model=g("PIEEG_LLM_FALLBACK_MODEL", ""),
             ws_url=g("PIEEG_WS_URL", "ws://localhost:1616"),
             dashboard_url=g("PIEEG_DASHBOARD_URL", "http://localhost:1617"),
         )
@@ -145,7 +194,12 @@ class AgentConfig:
         return cfg
 
     def _resolve_provider_defaults(self) -> None:
-        """Fill blank model / base_url / api_key from the registry + env."""
+        """Fill blank model / base_url / api_key from the registry + env.
+        
+        Also automatically configures fallback to a smaller model from the same
+        provider if no explicit fallback is configured.
+        """
+        # Primary provider
         spec = PROVIDERS.get(self.provider)
         if not spec:
             return
@@ -155,6 +209,24 @@ class AgentConfig:
             self.base_url = spec["base_url"]
         if not self.api_key and spec.get("env_key"):
             self.api_key = os.environ.get(spec["env_key"], "")
+        
+        # Fallback provider (if explicitly configured)
+        if self.fallback_provider:
+            fallback_spec = PROVIDERS.get(self.fallback_provider)
+            if fallback_spec:
+                if not self.fallback_model:
+                    self.fallback_model = fallback_spec["default_model"]
+                if not self.fallback_base_url:
+                    self.fallback_base_url = fallback_spec["base_url"]
+                if not self.fallback_api_key and fallback_spec.get("env_key"):
+                    self.fallback_api_key = os.environ.get(fallback_spec["env_key"], "")
+        
+        # Automatic fallback: use same provider with smaller model if available
+        elif self.model in AUTO_FALLBACK_MODELS.get(self.provider, {}):
+            self.fallback_provider = self.provider
+            self.fallback_model = AUTO_FALLBACK_MODELS[self.provider][self.model]
+            self.fallback_base_url = self.base_url
+            self.fallback_api_key = self.api_key
 
     # ── Introspection helpers ──────────────────────────────────────────
     @property

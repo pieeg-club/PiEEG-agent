@@ -182,6 +182,7 @@ export type ChatWireEvent =
   | { type: "token"; text: string }
   | { type: "tool_start"; name: string; arguments: Record<string, unknown> }
   | { type: "tool_result"; name: string; result: unknown }
+  | { type: "model_switch"; text: string; reason: string }
   | {
       type: "done";
       text: string;

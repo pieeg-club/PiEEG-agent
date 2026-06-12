@@ -27,6 +27,7 @@ import time
 from dataclasses import dataclass, field
 from typing import Any, Generator, Iterator, Literal
 
+from ..llm._http import LLMHTTPError
 from ..llm.provider import LLMProvider, LLMResponse, Message, Usage
 from .context import ContextManager, should_compress_tool_result, compress_session_payload
 from .tools import Toolset
@@ -180,11 +181,12 @@ class CopilotEvent:
     * ``tool_start`` — the model asked to run ``name``; ``arguments`` is the
       parsed input. Emitted just before the tool executes so a UI can show it.
     * ``tool_result`` — that tool finished; ``result`` is its return payload.
+    * ``model_switch`` — switched to fallback model; ``text`` explains why.
     * ``done`` — terminal event carrying the full ``text``, the ordered
       ``tool_calls`` that ran, accumulated ``usage`` and ``iterations``.
     """
 
-    type: Literal["token", "tool_start", "tool_result", "done"]
+    type: Literal["token", "tool_start", "tool_result", "model_switch", "done"]
     text: str = ""
     name: str = ""
     arguments: dict = field(default_factory=dict)
@@ -192,6 +194,7 @@ class CopilotEvent:
     usage: Usage = field(default_factory=Usage)
     tool_calls: list[str] = field(default_factory=list)
     iterations: int = 0
+    reason: str = ""
 
 
 class Copilot:
@@ -208,8 +211,11 @@ class Copilot:
         max_tool_iters: int = 10,
         context_manager: ContextManager | None = None,
         min_request_interval: float = 0.5,
+        fallback_provider: LLMProvider | None = None,
     ):
         self._provider = provider
+        self._fallback_provider = fallback_provider
+        self._active_provider = provider
         self._tools = tools
         self._system = system
         self._max_tokens = max_tokens
@@ -219,6 +225,8 @@ class Copilot:
         self._context_manager = context_manager or ContextManager()
         self._min_request_interval = min_request_interval
         self._last_request_time: float = 0.0
+        self._fallback_active = False
+        self._consecutive_errors = 0
 
     # ── conversation surface ─────────────────────────────────────────────
     def reset(self) -> None:
@@ -389,6 +397,10 @@ class Copilot:
 
         Returns (via ``StopIteration.value``, i.e. ``yield from``) the final
         assembled :class:`LLMResponse` for the caller to act on.
+        
+        If the primary provider fails with a rate limit (HTTP 429) or service
+        error (HTTP 503) and a fallback provider is configured, automatically
+        switches to the fallback and emits a ``model_switch`` event.
         """
         # Rate limiting: ensure minimum interval between API requests
         if self._min_request_interval > 0:
@@ -401,15 +413,73 @@ class Copilot:
             self._last_request_time = time.time()
         
         response = LLMResponse()
-        for event in self._provider.stream_complete(
-            system=self._system,
-            messages=self._history,
-            tools=tools,
-            max_tokens=self._max_tokens,
-            temperature=self._temperature,
-        ):
-            if event.type == "text" and event.text:
-                yield CopilotEvent(type="token", text=event.text)
-            elif event.type == "final" and event.response is not None:
-                response = event.response
-        return response
+        
+        # Try primary provider first
+        try:
+            for event in self._active_provider.stream_complete(
+                system=self._system,
+                messages=self._history,
+                tools=tools,
+                max_tokens=self._max_tokens,
+                temperature=self._temperature,
+            ):
+                if event.type == "text" and event.text:
+                    yield CopilotEvent(type="token", text=event.text)
+                elif event.type == "final" and event.response is not None:
+                    response = event.response
+            
+            # Success - reset error counter
+            self._consecutive_errors = 0
+            
+            # If we were using fallback, try switching back to primary
+            if self._fallback_active and self._consecutive_errors == 0:
+                self._active_provider = self._provider
+                self._fallback_active = False
+                logger.info(f"Switched back to primary model: {self._provider.name}")
+            
+            return response
+            
+        except LLMHTTPError as exc:
+            # Check if we should switch to fallback
+            should_fallback = (
+                self._fallback_provider is not None
+                and not self._fallback_active
+                and exc.status in (429, 503)  # Rate limit or service unavailable
+            )
+            
+            if should_fallback:
+                # Switch to fallback
+                self._active_provider = self._fallback_provider
+                self._fallback_active = True
+                self._consecutive_errors += 1
+                
+                reason = "rate limit" if exc.status == 429 else "service error"
+                logger.warning(
+                    f"Primary model ({self._provider.name}) hit {reason}, "
+                    f"switching to fallback ({self._fallback_provider.name})"
+                )
+                
+                # Notify user
+                yield CopilotEvent(
+                    type="model_switch",
+                    text=f"Switched to {self._fallback_provider.name}",
+                    reason=f"Primary model ({self._provider.name}) is temporarily unavailable ({reason})",
+                )
+                
+                # Retry with fallback
+                for event in self._fallback_provider.stream_complete(
+                    system=self._system,
+                    messages=self._history,
+                    tools=tools,
+                    max_tokens=self._max_tokens,
+                    temperature=self._temperature,
+                ):
+                    if event.type == "text" and event.text:
+                        yield CopilotEvent(type="token", text=event.text)
+                    elif event.type == "final" and event.response is not None:
+                        response = event.response
+                
+                return response
+            else:
+                # No fallback available or already using it - re-raise
+                raise
