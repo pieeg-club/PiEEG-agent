@@ -1,10 +1,11 @@
+import { memo, useCallback } from "react";
 import type { Patterns } from "../types";
 import { clamp01, pct } from "../util";
 
 // Live activation of every loaded pattern (smoothed probability + on/off),
 // plus the entry points to train a new one, explain one, or forget one.
 // Mirrors detect_patterns; explain/forget go through the REST API.
-export function PatternTicker({
+export const PatternTicker = memo(function PatternTicker({
   patterns,
   onTrain,
   onExplain,
@@ -17,23 +18,23 @@ export function PatternTicker({
 }) {
   const rows = patterns?.patterns || [];
   
-  const getHealthIcon = (status: string) => {
+  const getHealthIcon = useCallback((status: string) => {
     switch (status) {
       case 'healthy': return '✓';
       case 'degraded': return '⚠';
       case 'needs_retrain': return '🔄';
       default: return '';
     }
-  };
+  }, []);
   
-  const getHealthClass = (status: string) => {
+  const getHealthClass = useCallback((status: string) => {
     switch (status) {
       case 'healthy': return 'health-healthy';
       case 'degraded': return 'health-degraded';
       case 'needs_retrain': return 'health-needs-retrain';
       default: return '';
     }
-  };
+  }, []);
   
   return (
     <section className="card">
@@ -101,4 +102,4 @@ export function PatternTicker({
       )}
     </section>
   );
-}
+});

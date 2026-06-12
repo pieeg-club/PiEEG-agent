@@ -1,3 +1,4 @@
+import { memo } from "react";
 import type { Artifacts, Bands, NeuralState, Quality } from "../types";
 import { ago, cap, clamp01, orderBands, pct } from "../util";
 
@@ -24,7 +25,7 @@ function Meter({ label, value, tone }: { label: string; value?: number; tone?: s
 
 // The ~1 Hz smoothed state: focus / relax / engagement, dominant band and a
 // signal-quality readout. Mirrors get_neural_state.
-export function StateCard({ state }: { state?: NeuralState }) {
+export const StateCard = memo(function StateCard({ state }: { state?: NeuralState }) {
   const nodata = !state || state.status === "no_data";
   return (
     <section className="card state-card">
@@ -73,10 +74,10 @@ export function StateCard({ state }: { state?: NeuralState }) {
       )}
     </section>
   );
-}
+});
 
 // Relative band powers averaged across channels. Mirrors get_band_powers.
-export function BandBars({ bands }: { bands?: Bands }) {
+export const BandBars = memo(function BandBars({ bands }: { bands?: Bands }) {
   const rel = bands?.relative;
   const nodata = !rel || bands?.status === "no_data";
   return (
@@ -106,7 +107,7 @@ export function BandBars({ bands }: { bands?: Bands }) {
       )}
     </section>
   );
-}
+});
 
 const Q_TONE: Record<string, string> = {
   good: "q-good",
@@ -117,7 +118,7 @@ const Q_TONE: Record<string, string> = {
 };
 
 // Per-channel signal-quality verdicts. Mirrors get_channel_quality.
-export function QualityGrid({ quality }: { quality?: Quality }) {
+export const QualityGrid = memo(function QualityGrid({ quality }: { quality?: Quality }) {
   const chans = quality?.channels;
   return (
     <section className="card">
@@ -151,7 +152,7 @@ export function QualityGrid({ quality }: { quality?: Quality }) {
       )}
     </section>
   );
-}
+});
 
 const ART_TONE: Record<string, string> = {
   blink: "a-blink",
@@ -161,7 +162,7 @@ const ART_TONE: Record<string, string> = {
 };
 
 // Recent transients (blink / jaw / motion). Mirrors find_artifacts.
-export function ArtifactFeed({ artifacts }: { artifacts?: Artifacts }) {
+export const ArtifactFeed = memo(function ArtifactFeed({ artifacts }: { artifacts?: Artifacts }) {
   const rows = (artifacts?.artifacts || []).slice().reverse();
   return (
     <section className="card">
@@ -184,4 +185,4 @@ export function ArtifactFeed({ artifacts }: { artifacts?: Artifacts }) {
       )}
     </section>
   );
-}
+});
