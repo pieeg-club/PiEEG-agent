@@ -229,3 +229,36 @@ export interface TrainReply {
   action: string;
   result: TrainResult;
 }
+
+// ── notebook types ─────────────────────────────────────────────────────
+export interface NotebookCellOutput {
+  type: "stream" | "result" | "error" | "image";
+  content: string | Record<string, unknown>;
+}
+
+export interface NotebookCell {
+  index: number;
+  type: "markdown" | "code";
+  source: string;
+  outputs?: NotebookCellOutput[];
+}
+
+export interface NotebookMetadata {
+  created?: string;
+  pieeg?: {
+    stream_name?: string;
+    channels?: {
+      count: number;
+      labels?: string[];
+    };
+    sample_rate?: number;
+    mains_hz?: number;
+  };
+  [key: string]: unknown;
+}
+
+export interface NotebookData {
+  path: string;
+  cells: NotebookCell[];
+  metadata: NotebookMetadata;
+}

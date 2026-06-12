@@ -70,12 +70,14 @@ class WebEngine:
         decode: _Toolset,
         info: dict | None = None,
         actions: Any | None = None,
+        utility: _Toolset | None = None,
     ):
         self._copilot = copilot
         self._senses = senses
         self._decode = decode
         self._info = dict(info or {})
         self._actions = actions
+        self._utility = utility
         self._chat_lock = threading.Lock()
 
     # ── metadata ─────────────────────────────────────────────────────────
@@ -150,6 +152,19 @@ class WebEngine:
 
     def train_cancel(self) -> dict:
         return self._decode.call("cancel_pattern_training", {})
+
+    # ── notebooks ────────────────────────────────────────────────────────
+    def read_notebook(self, path: str) -> dict:
+        """Read a notebook structure and outputs."""
+        if self._utility is None:
+            return {"error": "Utility tools not available"}
+        return self._utility.call("read_notebook", {"path": path})
+
+    def list_notebooks(self, path: str = ".", recursive: bool = False) -> dict:
+        """List all notebooks in a directory."""
+        if self._utility is None:
+            return {"error": "Utility tools not available"}
+        return self._utility.call("list_notebooks", {"path": path, "recursive": recursive})
 
     # ── LSL streams discovery ────────────────────────────────────────────
     def list_streams(self, wait: float = 2.0) -> dict:

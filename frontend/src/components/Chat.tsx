@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { marked } from "marked";
 import type { ChatMessage, Part, ToolPart } from "../hooks/useChatSocket";
 import { toast } from "./Toast";
+import { NotebookViewer } from "./NotebookViewer";
 
 const SUGGESTIONS = [
   "What is my brain doing right now?",
@@ -30,6 +31,46 @@ function ToolChip({ part }: { part: ToolPart }) {
   );
 }
 
+function NotebookResultChip({ part }: { part: ToolPart }) {
+  const [showNotebook, setShowNotebook] = useState(false);
+  const result = part.result as { path?: string; cells?: number; status?: string; error?: string } | undefined;
+  
+  if (!result || result.error) {
+    return <ToolChip part={part} />;
+  }
+
+  const path = result.path;
+  const cellCount = result.cells || 0;
+  const notebookName = path ? path.split(/[/\\]/).pop() : "notebook.ipynb";
+
+  return (
+    <>
+      <div className="notebook-result-chip">
+        <div className="notebook-chip-icon">📓</div>
+        <div className="notebook-chip-content">
+          <div className="notebook-chip-title">
+            {part.name === "create_notebook" ? "Created notebook" : "Executed notebook"}
+          </div>
+          <div className="notebook-chip-name">{notebookName}</div>
+          <div className="notebook-chip-meta">{cellCount} cells</div>
+        </div>
+        <button
+          className="notebook-chip-btn"
+          onClick={() => setShowNotebook(true)}
+        >
+          View
+        </button>
+      </div>
+      {showNotebook && path && (
+        <NotebookViewer
+          notebookPath={path}
+          onClose={() => setShowNotebook(false)}
+        />
+      )}
+    </>
+  );
+}
+
 function renderPart(p: Part, i: number, msgId: string) {
   if (p.kind === "text") {
     const html = marked.parse(p.text, { async: false }) as string;
@@ -37,6 +78,16 @@ function renderPart(p: Part, i: number, msgId: string) {
       <div className="text" key={`${msgId}-text-${i}`} dangerouslySetInnerHTML={{ __html: html }} />
     );
   }
+  
+  // Special rendering for notebook tools
+  if (
+    p.kind === "tool" &&
+    p.status === "done" &&
+    (p.name === "create_notebook" || p.name === "run_notebook")
+  ) {
+    return <NotebookResultChip part={p} key={`${msgId}-tool-${i}-${p.name}`} />;
+  }
+  
   return <ToolChip part={p} key={`${msgId}-tool-${i}-${p.name}`} />;
 }
 

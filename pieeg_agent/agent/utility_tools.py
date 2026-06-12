@@ -244,6 +244,24 @@ class UtilityTools:
             self._read_notebook,
         ))
 
+        self._add(Tool(
+            _spec(
+                "list_notebooks",
+                "List all Jupyter notebooks in a directory. Returns paths and metadata.",
+                {
+                    "path": {
+                        "type": "string",
+                        "description": "Directory path to search (default: current directory).",
+                    },
+                    "recursive": {
+                        "type": "boolean",
+                        "description": "Search subdirectories (default: false).",
+                    },
+                },
+            ),
+            self._list_notebooks,
+        ))
+
     # ── handlers ────────────────────────────────────────────────────────
 
     def _list_tools(self, args: dict) -> dict:
@@ -587,3 +605,35 @@ class UtilityTools:
             }
         except Exception as e:
             return {"error": f"Failed to read notebook: {e}"}
+
+    def _list_notebooks(self, args: dict) -> dict:
+        """List all Jupyter notebooks in a directory."""
+        path = Path(args.get("path", ".")).expanduser()
+        recursive = args.get("recursive", False)
+        
+        if not path.exists():
+            return {"error": f"Directory not found: {path}"}
+        
+        if not path.is_dir():
+            return {"error": f"Not a directory: {path}"}
+        
+        try:
+            pattern = "**/*.ipynb" if recursive else "*.ipynb"
+            notebooks = list(path.glob(pattern))
+            
+            result_list = []
+            for nb_path in sorted(notebooks):
+                stat = nb_path.stat()
+                result_list.append({
+                    "path": str(nb_path),
+                    "name": nb_path.name,
+                    "size": stat.st_size,
+                    "modified": stat.st_mtime,
+                })
+            
+            return {
+                "count": len(result_list),
+                "notebooks": result_list,
+            }
+        except Exception as e:
+            return {"error": f"Failed to list notebooks: {e}"}
