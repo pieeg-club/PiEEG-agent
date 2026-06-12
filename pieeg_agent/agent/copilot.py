@@ -212,6 +212,8 @@ class Copilot:
         context_manager: ContextManager | None = None,
         min_request_interval: float = 0.5,
         fallback_provider: LLMProvider | None = None,
+        per_iteration_timeout: float = 120.0,
+        stream_heartbeat_timeout: float = 30.0,
     ):
         self._provider = provider
         self._fallback_provider = fallback_provider
@@ -220,6 +222,10 @@ class Copilot:
         self._system = system
         self._max_tokens = max_tokens
         self._temperature = temperature
+        # max_tool_iters prevents infinite loops where the model calls tools
+        # endlessly without converging to an answer. 10 iterations means the
+        # model can do ~5 rounds of tool calls (ask → tool → ask → tool → ...)
+        # which is enough for complex multi-step tasks while preventing runaway.
         self._max_tool_iters = max_tool_iters
         self._history: list[Message] = []
         self._context_manager = context_manager or ContextManager()
@@ -227,6 +233,10 @@ class Copilot:
         self._last_request_time: float = 0.0
         self._fallback_active = False
         self._consecutive_errors = 0
+        # Timeout per iteration (tool call + LLM response) - triggers fallback
+        self._per_iteration_timeout = per_iteration_timeout
+        # Timeout between streaming chunks - detects stalled connections
+        self._stream_heartbeat_timeout = stream_heartbeat_timeout
 
     # ── conversation surface ─────────────────────────────────────────────
     def reset(self) -> None:
@@ -398,9 +408,14 @@ class Copilot:
         Returns (via ``StopIteration.value``, i.e. ``yield from``) the final
         assembled :class:`LLMResponse` for the caller to act on.
         
-        If the primary provider fails with a rate limit (HTTP 429) or service
-        error (HTTP 503) and a fallback provider is configured, automatically
-        switches to the fallback and emits a ``model_switch`` event.
+        If the primary provider fails with a rate limit (HTTP 429), service
+        error (HTTP 503), timeout, or stream stall, and a fallback provider
+        is configured, automatically switches to the fallback and emits a
+        ``model_switch`` event.
+        
+        Implements two levels of timeout protection:
+        - HTTP-level timeout (60s default) for initial connection
+        - Streaming heartbeat timeout (30s) to detect stalled responses
         """
         # Rate limiting: ensure minimum interval between API requests
         if self._min_request_interval > 0:
@@ -413,9 +428,13 @@ class Copilot:
             self._last_request_time = time.time()
         
         response = LLMResponse()
+        iteration_start = time.time()
         
-        # Try primary provider first
+        # Try primary provider first with timeout detection
         try:
+            last_chunk_time = time.time()
+            chunk_count = 0
+            
             for event in self._active_provider.stream_complete(
                 system=self._system,
                 messages=self._history,
@@ -423,10 +442,25 @@ class Copilot:
                 max_tokens=self._max_tokens,
                 temperature=self._temperature,
             ):
+                # Check for streaming heartbeat timeout (stalled connection)
+                now = time.time()
+                if now - last_chunk_time > self._stream_heartbeat_timeout:
+                    raise TimeoutError(
+                        f"Stream stalled: no chunks for {self._stream_heartbeat_timeout:.0f}s"
+                    )
+                
+                last_chunk_time = now
+                chunk_count += 1
+                
                 if event.type == "text" and event.text:
                     yield CopilotEvent(type="token", text=event.text)
                 elif event.type == "final" and event.response is not None:
                     response = event.response
+            
+            iteration_time = time.time() - iteration_start
+            logger.debug(
+                f"Iteration completed in {iteration_time:.1f}s ({chunk_count} chunks)"
+            )
             
             # Success - reset error counter
             self._consecutive_errors = 0
@@ -439,12 +473,23 @@ class Copilot:
             
             return response
             
-        except LLMHTTPError as exc:
+        except (LLMHTTPError, TimeoutError, ConnectionError) as exc:
+            iteration_time = time.time() - iteration_start
+            
+            # Determine error type and whether to fallback
+            is_http_error = isinstance(exc, LLMHTTPError)
+            is_timeout = isinstance(exc, TimeoutError)
+            is_connection = isinstance(exc, ConnectionError)
+            
             # Check if we should switch to fallback
             should_fallback = (
                 self._fallback_provider is not None
                 and not self._fallback_active
-                and exc.status in (429, 503)  # Rate limit or service unavailable
+                and (
+                    (is_http_error and exc.status in (429, 503))  # Rate limit or service error
+                    or is_timeout  # Stream stalled or per-iteration timeout
+                    or is_connection  # Network failure
+                )
             )
             
             if should_fallback:
@@ -453,20 +498,29 @@ class Copilot:
                 self._fallback_active = True
                 self._consecutive_errors += 1
                 
-                reason = "rate limit" if exc.status == 429 else "service error"
+                # Determine user-friendly reason
+                if is_http_error:
+                    reason = "rate limit" if exc.status == 429 else "service error"
+                elif is_timeout:
+                    reason = "timeout" if "stalled" in str(exc).lower() else "slow response"
+                else:
+                    reason = "connection error"
+                
                 logger.warning(
-                    f"Primary model ({self._provider.name}) hit {reason}, "
-                    f"switching to fallback ({self._fallback_provider.name})"
+                    f"Primary model ({self._provider.name}) hit {reason} "
+                    f"after {iteration_time:.1f}s, switching to fallback "
+                    f"({self._fallback_provider.name})"
                 )
                 
-                # Notify user
+                # Notify user with helpful context
                 yield CopilotEvent(
                     type="model_switch",
                     text=f"Switched to {self._fallback_provider.name}",
-                    reason=f"Primary model ({self._provider.name}) is temporarily unavailable ({reason})",
+                    reason=f"Primary model ({self._provider.name}) {reason} after {iteration_time:.0f}s",
                 )
                 
-                # Retry with fallback
+                # Retry with fallback (with same heartbeat protection)
+                last_chunk_time = time.time()
                 for event in self._fallback_provider.stream_complete(
                     system=self._system,
                     messages=self._history,
@@ -474,6 +528,19 @@ class Copilot:
                     max_tokens=self._max_tokens,
                     temperature=self._temperature,
                 ):
+                    # Check heartbeat for fallback too
+                    now = time.time()
+                    if now - last_chunk_time > self._stream_heartbeat_timeout:
+                        # Both primary and fallback stalled - give up
+                        logger.error(
+                            f"Fallback model also stalled after "
+                            f"{now - last_chunk_time:.0f}s"
+                        )
+                        raise TimeoutError(
+                            "Both primary and fallback models timed out"
+                        )
+                    last_chunk_time = now
+                    
                     if event.type == "text" and event.text:
                         yield CopilotEvent(type="token", text=event.text)
                     elif event.type == "final" and event.response is not None:
@@ -482,4 +549,8 @@ class Copilot:
                 return response
             else:
                 # No fallback available or already using it - re-raise
+                logger.error(
+                    f"Request failed after {iteration_time:.1f}s: {exc}. "
+                    f"No fallback available."
+                )
                 raise
