@@ -87,10 +87,22 @@ export interface Artifacts {
   artifacts: Artifact[];
 }
 
+export interface PatternHealth {
+  confidence: number;
+  status: 'healthy' | 'degraded' | 'needs_retrain';
+  drift_score: number;
+  prediction_std: number;
+  n_predictions: number;
+  last_updated: number;
+}
+
 export interface PatternState {
   name: string;
   probability: number;
   active: boolean;
+  threshold?: number;
+  balanced_accuracy?: number;
+  health?: PatternHealth;
 }
 
 export interface Patterns {

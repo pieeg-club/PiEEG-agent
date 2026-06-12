@@ -100,4 +100,6 @@ class PatternTrainer:
             cv=cv.to_dict(),
             ranking=ranking.to_dict(),
             note=note,
+            training_mean=mean,
+            training_std=std,
         )

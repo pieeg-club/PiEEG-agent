@@ -60,6 +60,9 @@ class TrainedPattern:
     ranking: dict = field(default_factory=dict)
     created_at: float = field(default_factory=time.time)
     note: str = ""
+    # Training statistics for health monitoring
+    training_mean: np.ndarray | None = None
+    training_std: np.ndarray | None = None
 
     def to_dict(self) -> dict:
         return {
@@ -77,10 +80,14 @@ class TrainedPattern:
             "created_at": self.created_at,
             "note": self.note,
             "classifier": self.classifier.to_dict(),
+            "training_mean": self.training_mean.tolist() if self.training_mean is not None else None,
+            "training_std": self.training_std.tolist() if self.training_std is not None else None,
         }
 
     @classmethod
     def from_dict(cls, data: dict) -> "TrainedPattern":
+        training_mean = data.get("training_mean")
+        training_std = data.get("training_std")
         return cls(
             name=data["name"],
             classifier=PatternClassifier.from_dict(data["classifier"]),
@@ -89,6 +96,8 @@ class TrainedPattern:
             ranking=data.get("ranking", {}),
             created_at=float(data.get("created_at", time.time())),
             note=data.get("note", ""),
+            training_mean=np.array(training_mean) if training_mean is not None else None,
+            training_std=np.array(training_std) if training_std is not None else None,
         )
 
     @property
@@ -116,6 +125,8 @@ class PatternBank:
         release_margin: float = 0.15,
         on_detection: OnDetection | None = None,
     ):
+        from .health import PatternHealthMonitor
+
         self._frame_hz = float(frame_hz) or 8.0
         dt = 1.0 / self._frame_hz
         self._alpha = 1.0 - math.exp(-dt / max(smooth_tau, 1e-3))
@@ -123,14 +134,22 @@ class PatternBank:
         self._on_detection = on_detection
         self._patterns: dict[str, TrainedPattern] = {}
         self._runtime: dict[str, _Runtime] = {}
+        self._health = PatternHealthMonitor()
 
     # ── registry ────────────────────────────────────────────────────────
     def add(self, pattern: TrainedPattern) -> None:
         self._patterns[pattern.name] = pattern
         self._runtime[pattern.name] = _Runtime()
+        # Register with health monitor
+        self._health.register_pattern(
+            pattern.name,
+            training_mean=pattern.training_mean,
+            training_std=pattern.training_std,
+        )
 
     def remove(self, name: str) -> bool:
         self._runtime.pop(name, None)
+        self._health.unregister_pattern(name)
         return self._patterns.pop(name, None) is not None
 
     def names(self) -> list[str]:
@@ -152,6 +171,8 @@ class PatternBank:
             rt = self._runtime[name]
             p = pat.classifier.score_one(features)
             rt.ema += self._alpha * (p - rt.ema)
+            # Track prediction for health monitoring
+            self._health.track_prediction(name, features, p)
             on = pat.threshold
             off = pat.threshold - self._release_margin
             was = rt.active
@@ -178,15 +199,18 @@ class PatternBank:
         out = []
         for name, pat in self._patterns.items():
             rt = self._runtime[name]
-            out.append(
-                {
-                    "name": name,
-                    "probability": round(rt.ema, 3),
-                    "active": rt.active,
-                    "threshold": pat.threshold,
-                    "balanced_accuracy": pat.cv.get("balanced_accuracy"),
-                }
-            )
+            entry = {
+                "name": name,
+                "probability": round(rt.ema, 3),
+                "active": rt.active,
+                "threshold": pat.threshold,
+                "balanced_accuracy": pat.cv.get("balanced_accuracy"),
+            }
+            # Add health metrics if available
+            health = self._health.get_health(name)
+            if health is not None:
+                entry["health"] = health.to_dict()
+            out.append(entry)
         return out
 
     # ── persistence ─────────────────────────────────────────────────────

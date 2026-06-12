@@ -1276,9 +1276,79 @@ button {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  display: flex;
+  align-items: center;
+  gap: 6px;
 }
 .pattern-name:hover {
   color: var(--accent);
+}
+.pattern-tracks {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.confidence-track {
+  height: 3px;
+  opacity: 0.7;
+}
+.confidence-fill {
+  transition: width 0.3s ease, background 0.3s ease;
+}
+.confidence-fill.health-healthy {
+  background: linear-gradient(90deg, #2d7a5e, var(--good));
+}
+.confidence-fill.health-degraded {
+  background: linear-gradient(90deg, #8a6e3a, var(--warn));
+}
+.confidence-fill.health-needs-retrain {
+  background: linear-gradient(90deg, #8a3a3a, var(--bad));
+}
+.health-icon {
+  font-size: 11px;
+  padding: 2px 4px;
+  border-radius: 4px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 16px;
+}
+.health-icon.health-healthy {
+  color: var(--good);
+  background: rgba(62, 207, 142, 0.1);
+}
+.health-icon.health-degraded {
+  color: var(--warn);
+  background: rgba(245, 177, 61, 0.1);
+}
+.health-icon.health-needs-retrain {
+  color: var(--bad);
+  background: rgba(255, 107, 107, 0.1);
+  animation: pulse-warn 2s ease-in-out infinite;
+}
+@keyframes pulse-warn {
+  0%, 100% {
+    opacity: 0.8;
+  }
+  50% {
+    opacity: 1;
+    box-shadow: 0 0 8px rgba(255, 107, 107, 0.3);
+  }
+}
+.health-badge {
+  font-size: 10px;
+  margin-left: 4px;
+  padding: 1px 4px;
+  border-radius: 3px;
+  font-weight: 600;
+}
+.health-badge.health-degraded {
+  color: var(--warn);
+  background: rgba(245, 177, 61, 0.15);
+}
+.health-badge.health-needs-retrain {
+  color: var(--bad);
+  background: rgba(255, 107, 107, 0.15);
 }
 .pattern-fill {
   background: linear-gradient(90deg, #3a4d8a, var(--accent));
