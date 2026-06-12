@@ -16,6 +16,25 @@ export function PatternTicker({
   onForget: (name: string) => void;
 }) {
   const rows = patterns?.patterns || [];
+  
+  const getHealthIcon = (status: string) => {
+    switch (status) {
+      case 'healthy': return '✓';
+      case 'degraded': return '⚠';
+      case 'needs_retrain': return '🔄';
+      default: return '';
+    }
+  };
+  
+  const getHealthClass = (status: string) => {
+    switch (status) {
+      case 'healthy': return 'health-healthy';
+      case 'degraded': return 'health-degraded';
+      case 'needs_retrain': return 'health-needs-retrain';
+      default: return '';
+    }
+  };
+  
   return (
     <section className="card">
       <div className="card-title">
@@ -36,14 +55,39 @@ export function PatternTicker({
                 title="Explain this pattern"
               >
                 {p.name}
+                {p.health && (
+                  <span className={`health-icon ${getHealthClass(p.health.status)}`}
+                        title={`Confidence: ${pct(p.health.confidence)} (${p.health.status})`}>
+                    {getHealthIcon(p.health.status)}
+                  </span>
+                )}
               </button>
-              <div className="band-track">
-                <div
-                  className="band-fill pattern-fill"
-                  style={{ width: `${clamp01(p.probability) * 100}%` }}
-                />
+              <div className="pattern-tracks">
+                {/* Probability bar */}
+                <div className="band-track">
+                  <div
+                    className="band-fill pattern-fill"
+                    style={{ width: `${clamp01(p.probability) * 100}%` }}
+                  />
+                </div>
+                {/* Confidence bar (if health data available) */}
+                {p.health && (
+                  <div className="band-track confidence-track" title={`Confidence: ${pct(p.health.confidence)}`}>
+                    <div
+                      className={`band-fill confidence-fill ${getHealthClass(p.health.status)}`}
+                      style={{ width: `${clamp01(p.health.confidence) * 100}%` }}
+                    />
+                  </div>
+                )}
               </div>
-              <span className="band-val">{pct(p.probability)}</span>
+              <span className="band-val">
+                {pct(p.probability)}
+                {p.health && p.health.status !== 'healthy' && (
+                  <span className={`health-badge ${getHealthClass(p.health.status)}`}>
+                    {pct(p.health.confidence)}
+                  </span>
+                )}
+              </span>
               <button
                 className="x"
                 onClick={() => onForget(p.name)}
