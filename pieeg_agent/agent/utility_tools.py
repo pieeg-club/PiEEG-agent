@@ -179,25 +179,35 @@ class UtilityTools:
         self._add(Tool(
             _spec(
                 "create_notebook",
-                "Create a new Jupyter notebook with specified cells. Returns the "
-                "path to the created .ipynb file.",
+                "Create a new Jupyter notebook file with specified cells (code and/or "
+                "markdown). Use this when the user asks you to create a notebook, plot "
+                "data, analyze EEG, or make visualizations. The notebook will automatically "
+                "include session metadata (stream name, channels, sampling rate). Returns "
+                "the path to the created .ipynb file. After creating, you can optionally "
+                "call run_notebook to execute it and get outputs.",
                 {
                     "path": {
                         "type": "string",
-                        "description": "Path for the new notebook (e.g., 'analysis.ipynb').",
+                        "description": "Path for the new notebook file (e.g., 'eeg_analysis.ipynb'). "
+                                       "Use descriptive names based on the analysis purpose.",
                     },
                     "cells": {
                         "type": "array",
-                        "description": "Array of cell objects with 'type' (code/markdown) "
-                                       "and 'source' (cell content).",
+                        "description": "Array of cell objects. Each cell must have 'type' (either 'code' "
+                                       "for Python code or 'markdown' for formatted text) and 'source' "
+                                       "(the cell content as a string).",
                         "items": {
                             "type": "object",
                             "properties": {
                                 "type": {
                                     "type": "string",
                                     "enum": ["code", "markdown"],
+                                    "description": "'code' for Python or 'markdown' for text/headings",
                                 },
-                                "source": {"type": "string"},
+                                "source": {
+                                    "type": "string", 
+                                    "description": "Cell content (Python code or markdown text)"
+                                },
                             },
                             "required": ["type", "source"],
                         },

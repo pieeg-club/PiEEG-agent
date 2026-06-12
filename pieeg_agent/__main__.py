@@ -972,7 +972,7 @@ def _start_copilot(args) -> _CopilotSession | None:
         web = WebTools()
         utility = UtilityTools([senses, decode, docs, actuator, web, utility], session_metadata)
         tools = CombinedToolset(senses, decode, docs, actuator, web, utility)
-        copilot = Copilot(provider, tools, system=ACTUATOR_SYSTEM_PROMPT, fallback_provider=fallback_provider)
+        copilot = Copilot(provider, tools, system=ACTUATOR_SYSTEM_PROMPT, fallback_provider=fallback_provider, max_tokens=4096)
         # Build actions for direct web control (reuses the same client/gate)
         from .server import ActionGate, ActionPolicy, ServerActions
         gate = ActionGate(
@@ -985,7 +985,7 @@ def _start_copilot(args) -> _CopilotSession | None:
         web = WebTools()
         utility = UtilityTools([senses, decode, docs, web, utility], session_metadata)
         tools = CombinedToolset(senses, decode, docs, web, utility)
-        copilot = Copilot(provider, tools, system=SYSTEM_PROMPT, fallback_provider=fallback_provider)
+        copilot = Copilot(provider, tools, system=SYSTEM_PROMPT, fallback_provider=fallback_provider, max_tokens=4096)
         actions = None
     return _CopilotSession(
         copilot=copilot,

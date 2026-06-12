@@ -160,6 +160,11 @@ function deriveTrainingActions(messages: ChatMessage[]): QuickReply[] {
 function Bubble({ m }: { m: ChatMessage }) {
   const empty = m.parts.length === 0;
   
+  // Check if currently thinking (has tool calls running or waiting for next step)
+  const hasRunningTools = m.parts.some(p => p.kind === "tool" && p.status === "running");
+  const hasCompletedTools = m.parts.some(p => p.kind === "tool" && p.status === "done");
+  const isThinking = !m.done && (hasRunningTools || (hasCompletedTools && !empty));
+  
   const copyMessage = () => {
     const textParts = m.parts.filter((p) => p.kind === "text").map((p) => (p as { text: string }).text);
     const text = textParts.join("\n");
@@ -180,11 +185,27 @@ function Bubble({ m }: { m: ChatMessage }) {
             <i />
           </span>
         )}
-        {m.role === "assistant" && !empty && !m.done && <span className="cursor" />}
+        {m.role === "assistant" && isThinking && (
+          <div className="thinking">
+            <div className="thinking-orb">
+              <span /><span /><span /><span />
+            </div>
+            <span className="thinking-text">Thinking...</span>
+          </div>
+        )}
+        {m.role === "assistant" && !empty && !m.done && !isThinking && <span className="cursor" />}
         {m.usage && (
           <div className="usage">
             {m.usage.input_tokens}→{m.usage.output_tokens} tok
             {m.iterations ? ` · ${m.iterations} step${m.iterations > 1 ? "s" : ""}` : ""}
+          </div>
+        )}
+        {!m.done && m.iterations && m.iterations > 0 && (
+          <div className="progress-bar">
+            <div className="progress-text">Step {m.iterations} / 10</div>
+            <div className="progress-track">
+              <div className="progress-fill" style={{ width: `${(m.iterations / 10) * 100}%` }} />
+            </div>
           </div>
         )}
         {m.role === "assistant" && m.done && !empty && (

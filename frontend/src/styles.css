@@ -665,6 +665,119 @@ button {
   }
 }
 
+/* Multicolor thinking animation (Gemini-style) */
+.thinking {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 0;
+  margin-top: 8px;
+}
+
+.thinking-orb {
+  position: relative;
+  width: 40px;
+  height: 40px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.thinking-orb span {
+  position: absolute;
+  width: 100%;
+  height: 100%;
+  border-radius: 50%;
+  border: 2px solid transparent;
+  animation: thinking-rotate 3s linear infinite;
+}
+
+.thinking-orb span:nth-child(1) {
+  border-top-color: #ff6b9d;
+  border-right-color: #ff6b9d;
+  animation-delay: 0s;
+}
+
+.thinking-orb span:nth-child(2) {
+  border-top-color: #ffa500;
+  border-right-color: #ffa500;
+  animation-delay: 0.3s;
+  transform: scale(0.8);
+}
+
+.thinking-orb span:nth-child(3) {
+  border-top-color: #00d4ff;
+  border-right-color: #00d4ff;
+  animation-delay: 0.6s;
+  transform: scale(0.6);
+}
+
+.thinking-orb span:nth-child(4) {
+  border-top-color: var(--accent-2);
+  border-right-color: var(--accent-2);
+  animation-delay: 0.9s;
+  transform: scale(0.4);
+}
+
+@keyframes thinking-rotate {
+  0% {
+    transform: rotate(0deg) scale(1);
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.6;
+  }
+  100% {
+    transform: rotate(360deg) scale(1);
+    opacity: 1;
+  }
+}
+
+.thinking-text {
+  font-size: 13px;
+  color: var(--muted);
+  font-style: italic;
+  animation: thinking-pulse 1.5s ease-in-out infinite;
+}
+
+@keyframes thinking-pulse {
+  0%, 100% {
+    opacity: 0.5;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+/* Progress bar for iteration count */
+.progress-bar {
+  margin-top: 8px;
+  padding: 8px 0;
+}
+
+.progress-text {
+  font-size: 11px;
+  color: var(--muted);
+  margin-bottom: 4px;
+  font-family: var(--mono);
+}
+
+.progress-track {
+  width: 100%;
+  height: 3px;
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.progress-fill {
+  height: 100%;
+  background: linear-gradient(90deg, var(--accent-2), var(--accent));
+  border-radius: 2px;
+  transition: width 0.3s ease;
+  box-shadow: 0 0 8px rgba(94, 234, 212, 0.5);
+}
+
 .cursor {
   display: inline-block;
   width: 2px;
@@ -3262,6 +3375,7 @@ body {
   border-radius: 6px;
   font-size: 13px;
   font-weight: 600;
+  cursor: pointer;
   transition: all 0.2s ease;
   flex-shrink: 0;
 }

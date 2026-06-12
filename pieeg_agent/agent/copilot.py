@@ -39,6 +39,10 @@ You are PiEEG Copilot, a concise assistant embedded in a live brain-computer \
 interface. A person is wearing an EEG headset connected to PiEEG-server, and \
 its signal is reduced for you into language-sized facts you read through tools.
 
+IMPORTANT: When asked to create, plot, or analyze data in a notebook, you MUST \
+call the create_notebook tool with cells. Don't just say you'll do it—actually \
+call the tool in the same turn.
+
 Your senses (all read-only tools, always ground claims in a fresh call):
 - get_neural_state / get_band_powers — the smoothed ~1 Hz state and spectral \
 shape. focus / relax / engagement are convenience indices, not the whole story.
@@ -125,11 +129,12 @@ GIF, BMP, WebP). Useful for inspecting plots, spectrograms, or visualizations.
 - list_directory — list contents of a directory with file sizes and modification \
 times. Supports recursive listing.
 - create_notebook / run_notebook / read_notebook — create and execute Jupyter \
-notebooks for data analysis. create_notebook makes a new .ipynb with specified \
-cells (code/markdown) and automatically adds a header with EEG session metadata \
-(stream name, channels, sampling rate, date). run_notebook executes it and \
-returns outputs, read_notebook reads structure without executing. Use these for \
-reproducible analysis workflows.
+notebooks for data analysis. **When a user asks for a notebook, plot, or analysis, \
+call create_notebook immediately with cells array, don't just describe what you'd \
+do.** create_notebook makes a new .ipynb with specified cells (code/markdown) and \
+automatically adds a header with EEG session metadata (stream name, channels, \
+sampling rate, date). run_notebook executes it and returns outputs, read_notebook \
+reads structure without executing. Use these for reproducible analysis workflows.
 
 Be honest about the metrics:
 - focus / relax / engagement are 0..1 values **relative to this session's own \
@@ -206,7 +211,7 @@ class Copilot:
         tools: Toolset,
         *,
         system: str = SYSTEM_PROMPT,
-        max_tokens: int = 1024,
+        max_tokens: int = 4096,
         temperature: float = 0.0,
         max_tool_iters: int = 10,
         context_manager: ContextManager | None = None,
@@ -299,8 +304,36 @@ class Copilot:
         records_this_turn = 0
 
         for iteration in range(1, self._max_tool_iters + 1):
-            resp = yield from self._stream_turn(self._tools.specs())
+            logger.info(f"=== Copilot iteration {iteration}/{self._max_tool_iters} starting ===")
+            
+            # Get tool specs for this iteration
+            tool_specs = self._tools.specs()
+            logger.info(f"Toolset has {len(tool_specs)} tools available")
+            
+            # Check if create_notebook is in there
+            has_create_notebook = any(t.name == "create_notebook" for t in tool_specs)
+            if has_create_notebook:
+                logger.info("✅ create_notebook tool IS available")
+            else:
+                logger.error("🚨 create_notebook tool NOT in toolset!")
+            
+            resp = yield from self._stream_turn(tool_specs)
             total = total + resp.usage
+            
+            logger.info(
+                f"=== Iteration {iteration} complete: {len(resp.tool_calls)} tool(s), "
+                f"{len(resp.text)} chars text, wants_tools={resp.wants_tools} ==="
+            )
+            if resp.stop_reason:
+                logger.info(f"Stop reason: {resp.stop_reason}")
+            if resp.tool_calls:
+                logger.info(f"Tool calls requested: {[c.name for c in resp.tool_calls]}")
+            else:
+                logger.warning("⚠️  No tool calls requested in this iteration")
+            if resp.text:
+                logger.info(f"LLM response text: {resp.text}")
+            else:
+                logger.warning("⚠️  No text in LLM response")
 
             # Record the assistant turn (text and/or tool requests).
             self._history.append(
@@ -312,6 +345,7 @@ class Copilot:
             )
 
             if not resp.wants_tools:
+                logger.info(f"Copilot done after {iteration} iterations")
                 yield CopilotEvent(
                     type="done",
                     text=resp.text,
@@ -430,6 +464,15 @@ class Copilot:
         response = LLMResponse()
         iteration_start = time.time()
         
+        logger.debug(
+            f"LLM request starting: {self._active_provider.name}, "
+            f"{len(self._history)} messages, {len(tools) if tools else 0} tools"
+        )
+        if tools:
+            logger.debug(f"Tools available: {[t.name for t in tools[:5]]}{' ...' if len(tools) > 5 else ''}")
+        else:
+            logger.error("🚨 _stream_turn called with tools=None! This is a bug!")
+        
         # Try primary provider first with timeout detection
         try:
             last_chunk_time = time.time()
@@ -451,6 +494,9 @@ class Copilot:
                 
                 last_chunk_time = now
                 chunk_count += 1
+                
+                if chunk_count == 1:
+                    logger.debug("LLM streaming started (first chunk received)")
                 
                 if event.type == "text" and event.text:
                     yield CopilotEvent(type="token", text=event.text)
