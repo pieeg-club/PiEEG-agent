@@ -637,8 +637,7 @@ pytest tests/
 - [x] **Web UI** — FastAPI + React, chat + live brain cards
 - [x] **Connectivity analysis** — Cross-channel coupling
 - [x] **Session comparison** — Lab notebook tools
-- [ ] **Pattern health monitoring** — Confidence scoring, degradation alerts
-- [ ] **Neural lenses** — Pre-configured analysis perspectives (meditation, focus, vigilance)
+- [x] **Pattern health monitoring** — Confidence scoring, degradation alerts
 - [ ] **Jupyter notebook templates** — Auto-generated analysis notebooks
 - [ ] **P300 decoder** — Event-related potential for single-trial BCI control
 - [ ] **Multi-modal fusion** — EEG + EOG + EMG streams
@@ -651,6 +650,3 @@ CC BY-NC 4.0 (Creative Commons Attribution-NonCommercial 4.0 International) — 
 
 You are free to share and adapt this work for non-commercial purposes with attribution.
 
----
-
-**Made with ❤️ by the PiEEG community**
