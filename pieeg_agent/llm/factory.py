@@ -70,3 +70,54 @@ def get_provider(config: AgentConfig, *, timeout: float = 60.0) -> LLMProvider:
     raise ProviderError(
         f"Provider {config.provider!r} has unsupported kind {kind!r}."
     )
+
+
+def get_fallback_provider(config: AgentConfig, *, timeout: float = 60.0) -> LLMProvider | None:
+    """Build the fallback LLM provider if configured, otherwise returns None.
+    
+    The fallback provider is used for resilience when the primary provider hits
+    rate limits or errors. It's optional and configured via PIEEG_LLM_FALLBACK_PROVIDER.
+    """
+    if not config.fallback_provider:
+        return None
+    
+    spec = PROVIDERS.get(config.fallback_provider)
+    if not spec:
+        # Don't fail if fallback is misconfigured, just log and continue without it
+        return None
+    
+    kind = spec.get("kind")
+    
+    # Check for API key if needed
+    needs_key = bool(spec.get("env_key"))
+    if needs_key and not config.fallback_api_key:
+        # Don't fail, just skip fallback
+        return None
+    
+    try:
+        if kind == "anthropic":
+            return AnthropicProvider(
+                api_key=config.fallback_api_key,
+                model=config.fallback_model,
+                base_url=config.fallback_base_url,
+                timeout=timeout,
+            )
+        if kind == "openai":
+            return OpenAICompatProvider(
+                api_key=config.fallback_api_key,
+                model=config.fallback_model,
+                base_url=config.fallback_base_url,
+                timeout=timeout,
+            )
+        if kind == "echo":
+            return EchoProvider(
+                api_key="",
+                model=config.fallback_model,
+                base_url="",
+                timeout=0.0,
+            )
+    except Exception:
+        # Don't fail if fallback provider can't be created
+        return None
+    
+    return None

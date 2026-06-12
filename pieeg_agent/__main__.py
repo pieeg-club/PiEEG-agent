@@ -805,7 +805,7 @@ def _start_copilot(args) -> _CopilotSession | None:
         UtilityTools,
         WebTools,
     )
-    from .llm import ProviderError, get_provider
+    from .llm import ProviderError, get_provider, get_fallback_provider
     from .perceive import CascadeConfig, PerceptionCascade
 
     cfg = AgentConfig.from_env(
@@ -821,8 +821,13 @@ def _start_copilot(args) -> _CopilotSession | None:
     # told to plug in a headset only to hit a missing-key error afterwards.
     # If provider is not configured, check saved config or prompt interactively.
     provider = None
+    fallback_provider = None
     try:
         provider = get_provider(cfg)
+        fallback_provider = get_fallback_provider(cfg)
+        if fallback_provider:
+            fallback_type = "auto" if cfg.fallback_provider == cfg.provider else "custom"
+            print(f"Fallback configured ({fallback_type}): {cfg.fallback_provider}:{cfg.fallback_model}")
     except ProviderError as exc:
         # Check if this is a missing API key error
         if "API key" in str(exc):
@@ -962,7 +967,7 @@ def _start_copilot(args) -> _CopilotSession | None:
         web = WebTools()
         utility = UtilityTools([senses, decode, docs, actuator, web, utility], session_metadata)
         tools = CombinedToolset(senses, decode, docs, actuator, web, utility)
-        copilot = Copilot(provider, tools, system=ACTUATOR_SYSTEM_PROMPT)
+        copilot = Copilot(provider, tools, system=ACTUATOR_SYSTEM_PROMPT, fallback_provider=fallback_provider)
         # Build actions for direct web control (reuses the same client/gate)
         from .server import ActionGate, ActionPolicy, ServerActions
         gate = ActionGate(
@@ -975,7 +980,7 @@ def _start_copilot(args) -> _CopilotSession | None:
         web = WebTools()
         utility = UtilityTools([senses, decode, docs, web, utility], session_metadata)
         tools = CombinedToolset(senses, decode, docs, web, utility)
-        copilot = Copilot(provider, tools, system=SYSTEM_PROMPT)
+        copilot = Copilot(provider, tools, system=SYSTEM_PROMPT, fallback_provider=fallback_provider)
         actions = None
     return _CopilotSession(
         copilot=copilot,

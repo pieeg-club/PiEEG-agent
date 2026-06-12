@@ -10,7 +10,7 @@ side-effect free.
 from __future__ import annotations
 
 from .anthropic import AnthropicProvider
-from .factory import ProviderError, get_provider
+from .factory import ProviderError, get_provider, get_fallback_provider
 from .openai_compat import OpenAICompatProvider
 from .provider import (
     LLMProvider,
@@ -33,5 +33,6 @@ __all__ = [
     "AnthropicProvider",
     "OpenAICompatProvider",
     "get_provider",
+    "get_fallback_provider",
     "ProviderError",
 ]

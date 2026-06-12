@@ -39,6 +39,9 @@ def event_to_dict(ev: CopilotEvent) -> dict:
     elif ev.type == "tool_result":
         out["name"] = ev.name
         out["result"] = ev.result
+    elif ev.type == "model_switch":
+        out["text"] = ev.text
+        out["reason"] = ev.reason
     elif ev.type == "done":
         out["text"] = ev.text
         out["tool_calls"] = ev.tool_calls
