@@ -824,10 +824,6 @@ def _start_copilot(args) -> _CopilotSession | None:
     fallback_provider = None
     try:
         provider = get_provider(cfg)
-        fallback_provider = get_fallback_provider(cfg)
-        if fallback_provider:
-            fallback_type = "auto" if cfg.fallback_provider == cfg.provider else "custom"
-            print(f"Fallback configured ({fallback_type}): {cfg.fallback_provider}:{cfg.fallback_model}")
     except ProviderError as exc:
         # Check if this is a missing API key error
         if "API key" in str(exc):
@@ -903,6 +899,14 @@ def _start_copilot(args) -> _CopilotSession | None:
             # Different error - fail with original message
             print(f"LLM provider not ready: {exc}", file=sys.stderr)
             return None
+
+    # Resolve the fallback provider against the *final* cfg. The primary
+    # provider may have been rebuilt above from saved or interactive config,
+    # so computing fallback earlier would silently lose it on those paths.
+    fallback_provider = get_fallback_provider(cfg)
+    if fallback_provider:
+        fallback_type = "custom" if os.environ.get("PIEEG_LLM_FALLBACK_PROVIDER") else "auto"
+        print(f"Fallback configured ({fallback_type}): {cfg.fallback_provider}:{cfg.fallback_model}")
 
     # Optionally bring up the gated actuator side (also before hardware, so a
     # bad control URL fails fast). Default sessions stay read-only.

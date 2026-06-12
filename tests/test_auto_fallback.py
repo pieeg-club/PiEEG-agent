@@ -5,6 +5,35 @@ import pytest
 from pieeg_agent.config import AgentConfig, AUTO_FALLBACK_MODELS
 
 
+# Env vars these tests read or mutate. Snapshot and restore them around every
+# test so process-wide state doesn't leak between tests and cause
+# order-dependent failures.
+_FALLBACK_ENV_KEYS = (
+    "ANTHROPIC_API_KEY",
+    "OPENAI_API_KEY",
+    "GROQ_API_KEY",
+    "TOGETHER_API_KEY",
+    "PIEEG_LLM_PROVIDER",
+    "PIEEG_LLM_MODEL",
+    "PIEEG_LLM_FALLBACK_PROVIDER",
+    "PIEEG_LLM_FALLBACK_MODEL",
+)
+
+
+@pytest.fixture(autouse=True)
+def _restore_fallback_env():
+    saved = {k: os.environ.get(k) for k in _FALLBACK_ENV_KEYS}
+    try:
+        yield
+    finally:
+        for k, v in saved.items():
+            if v is None:
+                os.environ.pop(k, None)
+            else:
+                os.environ[k] = v
+
+
+
 def test_auto_fallback_anthropic_sonnet():
     """Sonnet should auto-fallback to Haiku."""
     os.environ["ANTHROPIC_API_KEY"] = "test-key"
@@ -87,8 +116,6 @@ def test_explicit_fallback_overrides_auto():
     assert cfg.fallback_provider == "groq"
     assert cfg.fallback_model == "llama-3.3-70b-versatile"  # groq default
     assert cfg.fallback_api_key == "groq-key"
-    
-    os.environ.pop("PIEEG_LLM_FALLBACK_PROVIDER", None)
 
 
 def test_all_anthropic_models_have_fallback():
@@ -99,14 +126,14 @@ def test_all_anthropic_models_have_fallback():
         "claude-3-5-sonnet-20241022",
     ]
     for model in major_models:
-        assert model in AUTO_FALLBACK_MODELS, f"{model} missing fallback"
+        assert model in AUTO_FALLBACK_MODELS["anthropic"], f"{model} missing fallback"
 
 
 def test_all_openai_models_have_fallback():
     """All major OpenAI models should have fallback configured."""
     major_models = ["gpt-4o", "gpt-4-turbo", "gpt-4"]
     for model in major_models:
-        assert model in AUTO_FALLBACK_MODELS, f"{model} missing fallback"
+        assert model in AUTO_FALLBACK_MODELS["openai"], f"{model} missing fallback"
 
 
 def test_fallback_shares_same_api_key():

@@ -91,30 +91,39 @@ DEFAULT_PROVIDER = "anthropic"
 # When rate limits or errors occur, the system can automatically fall back to
 # a smaller/cheaper model from the same provider. This mapping defines the
 # automatic fallback for common models. Users can override with env vars.
+#
+# Keyed by ``provider`` first, then by primary ``model``. Keying by provider
+# avoids selecting an invalid fallback when the same model string is used with
+# a different provider (e.g. an OpenAI model name configured against Together).
 
-AUTO_FALLBACK_MODELS: dict[str, str] = {
+AUTO_FALLBACK_MODELS: dict[str, dict[str, str]] = {
     # Anthropic: Sonnet/Opus → Haiku
-    "claude-sonnet-4-20250514": "claude-3-5-haiku-20241022",
-    "claude-opus-4-20250514": "claude-3-5-haiku-20241022",
-    "claude-3-5-sonnet-20241022": "claude-3-5-haiku-20241022",
-    "claude-3-opus-20240229": "claude-3-haiku-20240307",
-    "claude-3-sonnet-20240229": "claude-3-haiku-20240307",
-    
+    "anthropic": {
+        "claude-sonnet-4-20250514": "claude-3-5-haiku-20241022",
+        "claude-opus-4-20250514": "claude-3-5-haiku-20241022",
+        "claude-3-5-sonnet-20241022": "claude-3-5-haiku-20241022",
+        "claude-3-opus-20240229": "claude-3-haiku-20240307",
+        "claude-3-sonnet-20240229": "claude-3-haiku-20240307",
+    },
     # OpenAI: GPT-4 → GPT-4o-mini
-    "gpt-4o": "gpt-4o-mini",
-    "gpt-4-turbo": "gpt-4o-mini",
-    "gpt-4": "gpt-4o-mini",
-    "o1": "gpt-4o-mini",
-    "o1-mini": "gpt-4o-mini",
-    
+    "openai": {
+        "gpt-4o": "gpt-4o-mini",
+        "gpt-4-turbo": "gpt-4o-mini",
+        "gpt-4": "gpt-4o-mini",
+        "o1": "gpt-4o-mini",
+        "o1-mini": "gpt-4o-mini",
+    },
     # Groq: 70B → 8B
-    "llama-3.3-70b-versatile": "llama-3.1-8b-instant",
-    "llama-3.1-70b-versatile": "llama-3.1-8b-instant",
-    "mixtral-8x7b-32768": "llama-3.1-8b-instant",
-    
+    "groq": {
+        "llama-3.3-70b-versatile": "llama-3.1-8b-instant",
+        "llama-3.1-70b-versatile": "llama-3.1-8b-instant",
+        "mixtral-8x7b-32768": "llama-3.1-8b-instant",
+    },
     # Together AI: 70B → 8B
-    "meta-llama/Llama-3.3-70B-Instruct-Turbo": "meta-llama/Llama-3.1-8B-Instruct-Turbo",
-    "meta-llama/Llama-3.1-70B-Instruct-Turbo": "meta-llama/Llama-3.1-8B-Instruct-Turbo",
+    "together": {
+        "meta-llama/Llama-3.3-70B-Instruct-Turbo": "meta-llama/Llama-3.1-8B-Instruct-Turbo",
+        "meta-llama/Llama-3.1-70B-Instruct-Turbo": "meta-llama/Llama-3.1-8B-Instruct-Turbo",
+    },
 }
 
 
@@ -213,9 +222,9 @@ class AgentConfig:
                     self.fallback_api_key = os.environ.get(fallback_spec["env_key"], "")
         
         # Automatic fallback: use same provider with smaller model if available
-        elif self.model in AUTO_FALLBACK_MODELS:
+        elif self.model in AUTO_FALLBACK_MODELS.get(self.provider, {}):
             self.fallback_provider = self.provider
-            self.fallback_model = AUTO_FALLBACK_MODELS[self.model]
+            self.fallback_model = AUTO_FALLBACK_MODELS[self.provider][self.model]
             self.fallback_base_url = self.base_url
             self.fallback_api_key = self.api_key
 

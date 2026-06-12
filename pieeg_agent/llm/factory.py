@@ -14,11 +14,15 @@ only failure modes are a missing key or an unknown ``kind``, both reported as
 
 from __future__ import annotations
 
+import logging
+
 from ..config import PROVIDERS, AgentConfig
 from .anthropic import AnthropicProvider
 from .echo import EchoProvider
 from .openai_compat import OpenAICompatProvider
 from .provider import LLMProvider
+
+logger = logging.getLogger("pieeg.llm.factory")
 
 
 class ProviderError(RuntimeError):
@@ -83,7 +87,11 @@ def get_fallback_provider(config: AgentConfig, *, timeout: float = 60.0) -> LLMP
     
     spec = PROVIDERS.get(config.fallback_provider)
     if not spec:
-        # Don't fail if fallback is misconfigured, just log and continue without it
+        # Don't fail if fallback is misconfigured; log and continue without it.
+        logger.warning(
+            "Unknown fallback provider %r — continuing without fallback.",
+            config.fallback_provider,
+        )
         return None
     
     kind = spec.get("kind")
@@ -91,7 +99,12 @@ def get_fallback_provider(config: AgentConfig, *, timeout: float = 60.0) -> LLMP
     # Check for API key if needed
     needs_key = bool(spec.get("env_key"))
     if needs_key and not config.fallback_api_key:
-        # Don't fail, just skip fallback
+        # Don't fail, just skip fallback — log so a missing key is diagnosable.
+        logger.warning(
+            "Fallback provider %r is configured but has no API key — "
+            "continuing without fallback.",
+            config.fallback_provider,
+        )
         return None
     
     try:
@@ -117,7 +130,13 @@ def get_fallback_provider(config: AgentConfig, *, timeout: float = 60.0) -> LLMP
                 timeout=0.0,
             )
     except Exception:
-        # Don't fail if fallback provider can't be created
+        # Don't fail if fallback provider can't be created, but log for debugging.
+        logger.exception(
+            "Failed to create fallback provider %r (model=%r) — "
+            "continuing without fallback.",
+            config.fallback_provider,
+            config.fallback_model,
+        )
         return None
     
     return None
