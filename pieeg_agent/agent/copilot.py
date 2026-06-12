@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import json
 import logging
+import time
 from dataclasses import dataclass, field
 from typing import Any, Generator, Iterator, Literal
 
@@ -206,6 +207,7 @@ class Copilot:
         temperature: float = 0.0,
         max_tool_iters: int = 10,
         context_manager: ContextManager | None = None,
+        min_request_interval: float = 0.5,
     ):
         self._provider = provider
         self._tools = tools
@@ -215,6 +217,8 @@ class Copilot:
         self._max_tool_iters = max_tool_iters
         self._history: list[Message] = []
         self._context_manager = context_manager or ContextManager()
+        self._min_request_interval = min_request_interval
+        self._last_request_time: float = 0.0
 
     # ── conversation surface ─────────────────────────────────────────────
     def reset(self) -> None:
@@ -386,6 +390,16 @@ class Copilot:
         Returns (via ``StopIteration.value``, i.e. ``yield from``) the final
         assembled :class:`LLMResponse` for the caller to act on.
         """
+        # Rate limiting: ensure minimum interval between API requests
+        if self._min_request_interval > 0:
+            now = time.time()
+            elapsed = now - self._last_request_time
+            if elapsed < self._min_request_interval:
+                sleep_time = self._min_request_interval - elapsed
+                logger.debug(f"Rate limiting: sleeping {sleep_time:.2f}s")
+                time.sleep(sleep_time)
+            self._last_request_time = time.time()
+        
         response = LLMResponse()
         for event in self._provider.stream_complete(
             system=self._system,

@@ -39,8 +39,8 @@ def post_json(
     headers: dict[str, str],
     *,
     timeout: float = 60.0,
-    max_retries: int = 3,
-    retry_delay: float = 1.0,
+    max_retries: int = 5,
+    retry_delay: float = 2.0,
 ) -> dict:
     """POST ``payload`` as JSON and return the decoded JSON response.
 
@@ -49,7 +49,9 @@ def post_json(
     actionable (bad key, unknown model, rate limit, …).
     
     Rate limits (HTTP 429) are retried with exponential backoff up to
-    ``max_retries`` times. Other errors fail immediately.
+    ``max_retries`` times. Default is 5 retries with 2s base delay, giving
+    delays of 2s, 4s, 8s, 16s, 32s (total ~62s of retry window).
+    Other errors fail immediately.
     """
     body = json.dumps(payload).encode("utf-8")
     req = urllib.request.Request(url, data=body, method="POST")
@@ -104,8 +106,8 @@ def post_sse(
     headers: dict[str, str],
     *,
     timeout: float = 60.0,
-    max_retries: int = 3,
-    retry_delay: float = 1.0,
+    max_retries: int = 5,
+    retry_delay: float = 2.0,
 ) -> Iterator[dict]:
     """POST ``payload`` and yield each server-sent ``data:`` event as a dict.
 
@@ -118,7 +120,9 @@ def post_sse(
     so streaming and blocking callers handle failures the same way.
     
     Rate limits (HTTP 429) are retried with exponential backoff up to
-    ``max_retries`` times. Other errors fail immediately.
+    ``max_retries`` times. Default is 5 retries with 2s base delay, giving
+    delays of 2s, 4s, 8s, 16s, 32s (total ~62s of retry window).
+    Other errors fail immediately.
     """
     body = json.dumps(payload).encode("utf-8")
     req = urllib.request.Request(url, data=body, method="POST")
