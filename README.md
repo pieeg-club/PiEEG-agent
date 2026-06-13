@@ -23,7 +23,10 @@
 
 **Linux / macOS / WSL:**
 ```bash
-# Clone and auto-setup
+# One-line remote install (recommended)
+curl -sSL https://raw.githubusercontent.com/pieeg-club/PiEEG-agent/main/install.sh | bash
+
+# Or clone and setup manually
 git clone https://github.com/pieeg-club/PiEEG-agent.git
 cd PiEEG-agent
 chmod +x setup.sh && ./setup.sh
