@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import useTTS from "../hooks/useTTS";
 import type { Info } from "../types";
 
 const PROVIDERS = [
@@ -28,6 +29,23 @@ const MODELS: Record<string, string[]> = {
 interface LLMSettingsProps {
   info: Info | null;
   onClose: () => void;
+}
+
+function TTSControl() {
+  const tts = useTTS();
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+      <label style={{ display: "flex", alignItems: "center", gap: 8 }}>
+        <input
+          type="checkbox"
+          checked={tts.enabled}
+          onChange={(e) => tts.setEnabled(e.target.checked)}
+        />
+        <span>{tts.isSupported ? (tts.enabled ? "Enabled" : "Disabled") : "Not supported"}</span>
+      </label>
+      {!tts.isSupported && <div style={{ color: "#888" }}>Browser does not support SpeechSynthesis.</div>}
+    </div>
+  );
 }
 
 export function LLMSettings({ info, onClose }: LLMSettingsProps) {
@@ -172,6 +190,14 @@ export function LLMSettings({ info, onClose }: LLMSettingsProps) {
           {message && (
             <div className={`settings-message ${message.type}`}>{message.text}</div>
           )}
+
+          <div className="settings-section">
+            <label className="settings-label">
+              Text-to-speech
+              <span className="settings-hint">Play assistant replies aloud in the browser</span>
+            </label>
+            <TTSControl />
+          </div>
 
           <div className="modal-actions">
             <button className="btn-secondary" onClick={onClose} disabled={saving}>

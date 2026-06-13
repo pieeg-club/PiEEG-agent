@@ -2393,6 +2393,56 @@ body {
   transform: scale(0.98);
 }
 
+/* Grouped message toolbar (copy, speak, etc.) */
+.msg-toolbar {
+  position: absolute;
+  top: 10px;
+  right: 12px;
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  opacity: 0;
+  transform: translateY(-6px);
+  transition: opacity 0.22s ease, transform 0.22s ease;
+  pointer-events: none;
+}
+
+.bubble:hover .msg-toolbar {
+  opacity: 1;
+  transform: translateY(0);
+  pointer-events: auto;
+}
+
+.msg-btn {
+  width: 36px;
+  height: 36px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: linear-gradient(135deg, #1c2230 0%, #161a24 100%);
+  color: var(--muted);
+  font-size: 15px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  padding: 0;
+  backdrop-filter: blur(10px);
+  box-shadow: 0 2px 8px rgba(0,0,0,0.3), inset 0 1px rgba(255,255,255,0.03);
+  transition: all 0.18s cubic-bezier(0.4,0,0.2,1);
+}
+
+.msg-btn:hover {
+  transform: translateY(-2px) scale(1.03);
+  color: var(--accent);
+  box-shadow: 0 6px 18px rgba(110,168,254,0.12), inset 0 1px rgba(255,255,255,0.05);
+}
+
+.msg-btn.speak.speaking {
+  background: linear-gradient(135deg, #2a2f3a 0%, #242934 100%);
+  color: var(--warn);
+}
+
+
 /* ────────────────────────────────────────────────────────────────────────
    Loading Skeletons
    ──────────────────────────────────────────────────────────────────────── */

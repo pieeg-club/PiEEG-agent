@@ -3,6 +3,7 @@ import { marked } from "marked";
 import type { ChatMessage, Part, ToolPart } from "../hooks/useChatSocket";
 import { toast } from "./Toast";
 import { NotebookViewer } from "./NotebookViewer";
+import useTTS from "../hooks/useTTS";
 
 const SUGGESTIONS = [
   "What is my brain doing right now?",
@@ -173,6 +174,26 @@ function Bubble({ m }: { m: ChatMessage }) {
     });
   };
 
+  // TTS controls: provided by global hook in Chat (but Bubble can also call it)
+  const tts = useTTS();
+  const hasTextParts = m.parts.filter((p) => p.kind === "text").length > 0;
+  const messageText = m.parts
+    .filter((p) => p.kind === "text")
+    .map((p) => (p as { text: string }).text)
+    .join("\n");
+
+  const handleSpeak = () => {
+    if (!tts.isSupported) {
+      toast.info("Text-to-speech not supported in this browser");
+      return;
+    }
+    if (tts.speaking) {
+      tts.stop();
+      return;
+    }
+    tts.speak(messageText);
+  };
+
   return (
     <div className={"msg " + m.role}>
       <div className="avatar">{m.role === "user" ? "You" : "Agent"}</div>
@@ -209,9 +230,20 @@ function Bubble({ m }: { m: ChatMessage }) {
           </div>
         )}
         {m.role === "assistant" && m.done && !empty && (
-          <button className="copy-btn" onClick={copyMessage} title="Copy message">
-            📋
-          </button>
+          <div className="msg-toolbar">
+            <button className="msg-btn copy" onClick={copyMessage} title="Copy message">
+              📋
+            </button>
+            {hasTextParts && (
+              <button
+                className={`msg-btn speak ${tts.speaking ? "speaking" : ""}`}
+                onClick={handleSpeak}
+                title={tts.speaking ? "Stop" : "Speak message"}
+              >
+                {tts.speaking ? "⏹" : "🔊"}
+              </button>
+            )}
+          </div>
         )}
       </div>
     </div>
@@ -235,10 +267,27 @@ export function Chat({
 }) {
   const [text, setText] = useState("");
   const endRef = useRef<HTMLDivElement>(null);
+  const tts = useTTS();
+  const spokenRef = useRef<Set<string>>(new Set());
 
   useEffect(() => {
     endRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
+
+  // Auto-speak new assistant messages when TTS is enabled
+  useEffect(() => {
+    if (!tts.enabled || !tts.isSupported) return;
+    for (const m of messages) {
+      if (m.role === "assistant" && m.done && m.parts.length > 0 && !spokenRef.current.has(m.id)) {
+        const textParts = m.parts.filter((p) => p.kind === "text").map((p) => (p as { text: string }).text);
+        const text = textParts.join("\n").trim();
+        if (text) {
+          tts.speak(text);
+          spokenRef.current.add(m.id);
+        }
+      }
+    }
+  }, [messages, tts]);
 
   const submit = () => {
     const t = text.trim();
