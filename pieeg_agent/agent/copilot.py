@@ -295,6 +295,7 @@ class Copilot:
 
         total = Usage()
         used_tools: list[str] = []
+        full_text = ""  # Accumulate all response text for the non-streaming ask() wrapper
         # Pattern training is interactive: recording samples the *live* signal
         # the instant it is called, so the user must physically settle into each
         # state between takes. Cap recordings at one per user turn so the model
@@ -310,15 +311,9 @@ class Copilot:
             tool_specs = self._tools.specs()
             logger.info(f"Toolset has {len(tool_specs)} tools available")
             
-            # Check if create_notebook is in there
-            has_create_notebook = any(t.name == "create_notebook" for t in tool_specs)
-            if has_create_notebook:
-                logger.info("✅ create_notebook tool IS available")
-            else:
-                logger.error("🚨 create_notebook tool NOT in toolset!")
-            
             resp = yield from self._stream_turn(tool_specs)
             total = total + resp.usage
+            full_text += resp.text  # Accumulate text for ask() wrapper
             
             logger.info(
                 f"=== Iteration {iteration} complete: {len(resp.tool_calls)} tool(s), "
@@ -348,7 +343,7 @@ class Copilot:
                 logger.info(f"Copilot done after {iteration} iterations")
                 yield CopilotEvent(
                     type="done",
-                    text="",  # Text already streamed as tokens, don't duplicate
+                    text=full_text,  # Return full accumulated text for ask() wrapper
                     tool_calls=used_tools,
                     usage=total,
                     iterations=iteration,
@@ -424,11 +419,12 @@ class Copilot:
         # so the user still gets a reply instead of silence.
         final = yield from self._stream_turn(None)
         total = total + final.usage
+        full_text += final.text  # Accumulate final response text
         text = final.text or "(stopped after the tool-call limit)"
         self._history.append(Message(role="assistant", content=final.text))
         yield CopilotEvent(
             type="done",
-            text="",  # Text already streamed as tokens, don't duplicate
+            text=full_text,  # Return full accumulated text for ask() wrapper
             tool_calls=used_tools,
             usage=total,
             iterations=self._max_tool_iters,
