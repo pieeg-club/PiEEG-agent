@@ -280,6 +280,17 @@ class Copilot:
         ``tool_start`` / ``tool_result`` pair. The final ``done`` event mirrors
         what :meth:`ask` would have returned.
         """
+        # On each new user request, attempt to use the primary provider again
+        # (if we previously fell back due to rate limits/errors, this gives the
+        # primary another chance to succeed)
+        if self._fallback_active:
+            self._active_provider = self._provider
+            self._fallback_active = False
+            logger.info(
+                "New request: attempting primary provider (%s) again",
+                self._provider.name
+            )
+        
         self._history.append(Message(role="user", content=question))
         
         # Check if compression is needed before starting the tool loop
