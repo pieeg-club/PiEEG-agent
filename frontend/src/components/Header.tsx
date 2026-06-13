@@ -9,6 +9,7 @@ export function Header({
   onSystem,
   onLogs,
   onHistory,
+  sidebarOpen,
 }: {
   info: Info | null;
   connected: boolean;
@@ -16,16 +17,25 @@ export function Header({
   onSystem: () => void;
   onLogs: () => void;
   onHistory?: () => void;
+  sidebarOpen?: boolean;
 }) {
   return (
     <header className="app-header">
       <div className="brand">
         {onHistory && (
-          <button className="menu-btn" onClick={onHistory} title="Conversation history">
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <line x1="3" y1="6" x2="21" y2="6"></line>
-              <line x1="3" y1="12" x2="21" y2="12"></line>
-              <line x1="3" y1="18" x2="21" y2="18"></line>
+          <button className="menu-btn" onClick={onHistory} title={sidebarOpen ? "Close sidebar" : "Open sidebar"}>
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              {sidebarOpen ? (
+                <>
+                  <rect x="3" y="3" width="7" height="18" rx="1"></rect>
+                  <path d="M14 4l-4 8 4 8"></path>
+                </>
+              ) : (
+                <>
+                  <rect x="3" y="3" width="7" height="18" rx="1"></rect>
+                  <path d="M14 4l4 8-4 8"></path>
+                </>
+              )}
             </svg>
           </button>
         )}

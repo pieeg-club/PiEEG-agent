@@ -30,7 +30,7 @@ export default function App() {
   const [showSettings, setShowSettings] = useState(false);
   const [showSystem, setShowSystem] = useState(false);
   const [showLogs, setShowLogs] = useState(false);
-  const [showHistory, setShowHistory] = useState(false);
+  const [sidebarOpen, setSidebarOpen] = useState(true);
   const [explain, setExplain] = useState<{ name: string; data: PatternExplain | null } | null>(null);
 
   useEffect(() => {
@@ -58,14 +58,15 @@ export default function App() {
   };
 
   return (
-    <div className="app">
+    <div className={`app ${sidebarOpen ? "sidebar-open" : ""}`}>
       <Header 
         info={info} 
         connected={connected} 
         onSettings={() => setShowSettings(true)}
         onSystem={() => setShowSystem(true)}
         onLogs={() => setShowLogs(true)}
-        onHistory={() => setShowHistory(true)}
+        onHistory={() => setSidebarOpen(!sidebarOpen)}
+        sidebarOpen={sidebarOpen}
       />
       <main className="layout">
         <Chat
@@ -101,14 +102,13 @@ export default function App() {
       )}
       {showSettings && <LLMSettings info={info} onClose={() => setShowSettings(false)} />}
       {showSystem && <SystemControl onClose={() => setShowSystem(false)} />}
-      {showHistory && (
-        <ConversationList
-          currentId={chat.conversationId}
-          onSelect={chat.loadConversation}
-          onNew={chat.newConversation}
-          onClose={() => setShowHistory(false)}
-        />
-      )}
+      <ConversationList
+        currentId={chat.conversationId}
+        onSelect={chat.loadConversation}
+        onNew={chat.newConversation}
+        isOpen={sidebarOpen}
+        onToggle={() => setSidebarOpen(!sidebarOpen)}
+      />
       {showLogs && (
         <LogsPanel
           logs={logs.logs}
