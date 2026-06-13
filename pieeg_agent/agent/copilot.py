@@ -348,7 +348,7 @@ class Copilot:
                 logger.info(f"Copilot done after {iteration} iterations")
                 yield CopilotEvent(
                     type="done",
-                    text=resp.text,
+                    text="",  # Text already streamed as tokens, don't duplicate
                     tool_calls=used_tools,
                     usage=total,
                     iterations=iteration,
@@ -428,7 +428,7 @@ class Copilot:
         self._history.append(Message(role="assistant", content=final.text))
         yield CopilotEvent(
             type="done",
-            text=text,
+            text="",  # Text already streamed as tokens, don't duplicate
             tool_calls=used_tools,
             usage=total,
             iterations=self._max_tool_iters,
