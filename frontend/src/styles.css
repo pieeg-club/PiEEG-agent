@@ -2333,30 +2333,26 @@ body {
 /* Grouped message toolbar (copy, speak, etc.) */
 .msg-toolbar {
   display: flex;
-  gap: 6px;
+  gap: 4px;
   align-items: center;
-  margin-top: 12px;
-  padding-top: 10px;
+  margin-top: 8px;
+  padding-top: 8px;
   border-top: 1px solid rgba(255, 255, 255, 0.03);
   opacity: 0;
-  max-height: 0;
-  overflow: hidden;
-  transition: opacity 0.2s ease, max-height 0.25s ease, padding 0.25s ease, margin 0.25s ease;
+  transition: opacity 0.2s ease;
 }
 
 .msg:hover .msg-toolbar {
   opacity: 1;
-  max-height: 60px;
 }
 
 .msg-btn {
-  width: 32px;
-  height: 32px;
-  border: 1px solid rgba(255, 255, 255, 0.06);
-  border-radius: 8px;
-  background: rgba(255, 255, 255, 0.02);
+  width: 28px;
+  height: 28px;
+  border: 1px solid rgba(255, 255, 255, 0.04);
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.01);
   color: var(--muted);
-  font-size: 14px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -2366,20 +2362,19 @@ body {
 }
 
 .msg-btn:hover {
-  background: rgba(255, 255, 255, 0.06);
-  border-color: var(--accent);
-  color: var(--accent);
-  transform: scale(1.05);
+  background: rgba(255, 255, 255, 0.08);
+  border-color: rgba(255, 255, 255, 0.12);
+  color: var(--text);
 }
 
 .msg-btn:active {
-  transform: scale(0.98);
+  transform: scale(0.96);
 }
 
 .msg-btn.speak.speaking {
-  background: rgba(245, 177, 61, 0.12);
-  border-color: var(--warn);
-  color: var(--warn);
+  background: rgba(62, 207, 142, 0.08);
+  border-color: rgba(62, 207, 142, 0.2);
+  color: var(--good);
   animation: speaking-pulse 1.5s ease-in-out infinite;
 }
 
