@@ -243,9 +243,8 @@ function Bubble({ m }: { m: ChatMessage }) {
   };
 
   return (
-    <div className={"msg " + m.role}>
-      <div className="avatar">{m.role === "user" ? "You" : "Agent"}</div>
-      <div className={"bubble" + (m.error ? " error" : "")}>
+    <div className={"msg " + m.role + (m.error ? " error" : "")}>
+      <div className="msg-content">
         {m.parts.map((p, i) => renderPart(p, i, m.id))}
         {showTypingDots && (
           <span className="typing">
