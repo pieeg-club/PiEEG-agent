@@ -202,10 +202,17 @@ function deriveTrainingActions(messages: ChatMessage[]): QuickReply[] {
 function Bubble({ m }: { m: ChatMessage }) {
   const empty = m.parts.length === 0;
   
-  // Check if currently thinking (has tool calls running or waiting for next step)
+  // Loading states hierarchy:
+  // 1. Empty & not done -> typing dots (initial state)
+  // 2. Has tools running -> thinking animation
+  // 3. Has content & not done -> streaming cursor
   const hasRunningTools = m.parts.some(p => p.kind === "tool" && p.status === "running");
-  const hasCompletedTools = m.parts.some(p => p.kind === "tool" && p.status === "done");
-  const isThinking = !m.done && (hasRunningTools || (hasCompletedTools && !empty));
+  const hasTextContent = m.parts.some(p => p.kind === "text");
+  const hasAnyContent = m.parts.length > 0;
+  
+  const showTypingDots = m.role === "assistant" && empty && !m.done;
+  const showThinking = m.role === "assistant" && !m.done && hasRunningTools;
+  const showCursor = m.role === "assistant" && !empty && !m.done && !hasRunningTools;
   
   const copyMessage = () => {
     const textParts = m.parts.filter((p) => p.kind === "text").map((p) => (p as { text: string }).text);
@@ -240,14 +247,14 @@ function Bubble({ m }: { m: ChatMessage }) {
       <div className="avatar">{m.role === "user" ? "You" : "Agent"}</div>
       <div className={"bubble" + (m.error ? " error" : "")}>
         {m.parts.map((p, i) => renderPart(p, i, m.id))}
-        {m.role === "assistant" && empty && !m.done && (
+        {showTypingDots && (
           <span className="typing">
             <i />
             <i />
             <i />
           </span>
         )}
-        {m.role === "assistant" && isThinking && (
+        {showThinking && (
           <div className="thinking">
             <div className="thinking-orb">
               <span /><span /><span /><span />
@@ -255,7 +262,7 @@ function Bubble({ m }: { m: ChatMessage }) {
             <span className="thinking-text">Thinking...</span>
           </div>
         )}
-        {m.role === "assistant" && !empty && !m.done && !isThinking && <span className="cursor" />}
+        {showCursor && <span className="cursor" />}
         {m.usage && (
           <div className="usage">
             {m.usage.input_tokens}→{m.usage.output_tokens} tok
@@ -308,11 +315,21 @@ export function Chat({
 }) {
   const [text, setText] = useState("");
   const endRef = useRef<HTMLDivElement>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
   const tts = useTTS();
   const spokenRef = useRef<Set<string>>(new Set());
   const [displayedSuggestions, setDisplayedSuggestions] = useState<string[]>(() => 
     shuffleArray(ALL_SUGGESTIONS).slice(0, 6)
   );
+
+  // Auto-resize textarea based on content
+  useEffect(() => {
+    const textarea = textareaRef.current;
+    if (!textarea) return;
+    
+    textarea.style.height = 'auto';
+    textarea.style.height = Math.min(textarea.scrollHeight, 200) + 'px';
+  }, [text]);
 
   useEffect(() => {
     endRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -399,6 +416,7 @@ export function Chat({
 
       <div className="composer">
         <textarea
+          ref={textareaRef}
           value={text}
           placeholder="Ask about your brain — focus, signal quality, train a pattern…"
           onChange={(e) => setText(e.target.value)}
