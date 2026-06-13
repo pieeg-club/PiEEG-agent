@@ -5,12 +5,53 @@ import { toast } from "./Toast";
 import { NotebookViewer } from "./NotebookViewer";
 import useTTS from "../hooks/useTTS";
 
-const SUGGESTIONS = [
+const ALL_SUGGESTIONS = [
+  // Signal Quality & Monitoring
   "What is my brain doing right now?",
   "How is my signal quality?",
   "Which channels look bad?",
+  "Show me my current frequency bands",
+  "Is there any artifact contamination?",
+  "Which channel has the best signal?",
+  
+  // Training & Pattern Recognition
   "Let's train a new pattern together",
+  "Show me all trained patterns",
+  "Can I train a focus detection pattern?",
+  "Help me train a relaxation state",
+  "Train a pattern to detect eye blinks",
+  
+  // Brain States & Analysis
+  "Am I in a focused state right now?",
+  "What's my alpha/beta ratio?",
+  "Analyze my mental state trends",
+  "Is my theta activity elevated?",
+  
+  // Connectivity & Network Analysis
+  "Show me brain connectivity patterns",
+  "Which regions are most connected?",
+  "What's the coherence between channels?",
+  
+  // Troubleshooting & Help
+  "Why is my signal noisy?",
+  "How can I improve signal quality?",
+  "What do the different brain waves mean?",
+  "Explain the cascade monitor",
+  
+  // Advanced Features
+  "Export my current session data",
+  "Compare current state to baseline",
 ];
+
+// Fisher-Yates shuffle
+function shuffleArray<T>(array: T[]): T[] {
+  const shuffled = [...array];
+  for (let i = shuffled.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+  }
+  return shuffled;
+}
 
 function ToolChip({ part }: { part: ToolPart }) {
   const [open, setOpen] = useState(false);
@@ -269,6 +310,9 @@ export function Chat({
   const endRef = useRef<HTMLDivElement>(null);
   const tts = useTTS();
   const spokenRef = useRef<Set<string>>(new Set());
+  const [displayedSuggestions, setDisplayedSuggestions] = useState<string[]>(() => 
+    shuffleArray(ALL_SUGGESTIONS).slice(0, 6)
+  );
 
   useEffect(() => {
     endRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -300,6 +344,10 @@ export function Chat({
   const lastDone = messages.length > 0 && messages[messages.length - 1].done;
   const showQuickReplies = quickReplies.length > 0 && !busy && lastDone && connected;
 
+  const shuffleSuggestions = () => {
+    setDisplayedSuggestions(shuffleArray(ALL_SUGGESTIONS).slice(0, 6));
+  };
+
   return (
     <div className="chat">
       <div className="chat-thread">
@@ -310,12 +358,23 @@ export function Chat({
               A live EEG copilot. Ask about your signal, frequency bands and
               channel quality — or teach it a new pattern by example.
             </p>
-            <div className="suggestions">
-              {SUGGESTIONS.map((s) => (
-                <button key={s} className="suggestion" onClick={() => onSend(s)}>
-                  {s}
-                </button>
-              ))}
+            <div className="suggestions-wrapper">
+              <div className="suggestions">
+                {displayedSuggestions.map((s, i) => (
+                  <button key={`${s}-${i}`} className="suggestion" onClick={() => onSend(s)}>
+                    {s}
+                  </button>
+                ))}
+              </div>
+              <button className="shuffle-btn" onClick={shuffleSuggestions} title="Show different suggestions">
+                <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+                  <path d="M13 2L13 5L10 5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+                  <path d="M3 14L3 11L6 11" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+                  <path d="M12.5 5.5C11.5 4 9.5 3 7.5 3C4.5 3 2 5.5 2 8.5C2 9.5 2.5 10.5 3 11" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
+                  <path d="M3.5 10.5C4.5 12 6.5 13 8.5 13C11.5 13 14 10.5 14 7.5C14 6.5 13.5 5.5 13 5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
+                </svg>
+                <span>More suggestions</span>
+              </button>
             </div>
           </div>
         ) : (

@@ -289,7 +289,7 @@ button {
 .welcome {
   margin: auto;
   text-align: center;
-  max-width: 580px;
+  max-width: 960px;
   padding: 56px 28px;
   animation: fadeIn 0.6s ease-out;
 }
@@ -337,10 +337,66 @@ button {
   font-size: 15.5px;
   font-weight: 400;
 }
+.suggestions-wrapper {
+  width: 100%;
+  max-width: 920px;
+  margin: 0 auto;
+}
+
 .suggestions {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: repeat(3, 1fr);
   gap: 14px;
+  margin-bottom: 24px;
+}
+
+.shuffle-btn {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 auto;
+  padding: 11px 20px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 10px;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.shuffle-btn svg {
+  transition: transform 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.shuffle-btn:hover {
+  background: rgba(255, 255, 255, 0.06);
+  border-color: rgba(110, 168, 254, 0.3);
+  color: var(--text);
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+}
+
+.shuffle-btn:hover svg {
+  transform: rotate(180deg);
+}
+
+.shuffle-btn:active {
+  transform: translateY(0);
+}
+
+/* Responsive grid */
+@media (max-width: 760px) {
+  .suggestions {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+@media (max-width: 480px) {
+  .suggestions {
+    grid-template-columns: 1fr;
+  }
 }
 
 .suggestion {
@@ -349,17 +405,39 @@ button {
   background: linear-gradient(135deg, #13161f 0%, #0e1118 100%);
   border: 1px solid transparent;
   border-radius: 12px;
-  padding: 16px 18px;
-  font-size: 13.5px;
-  line-height: 1.5;
+  padding: 18px 20px;
+  font-size: 14px;
+  line-height: 1.6;
   font-weight: 500;
-  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
   cursor: pointer;
   position: relative;
   overflow: hidden;
   box-shadow: 
     0 2px 8px rgba(0, 0, 0, 0.3),
     inset 0 1px 0 rgba(255, 255, 255, 0.02);
+  min-height: 72px;
+  display: flex;
+  align-items: center;
+}
+
+/* Stagger fade-in on load */
+.suggestion:nth-child(1) { animation: fadeInUp 0.4s ease-out 0.05s backwards; }
+.suggestion:nth-child(2) { animation: fadeInUp 0.4s ease-out 0.1s backwards; }
+.suggestion:nth-child(3) { animation: fadeInUp 0.4s ease-out 0.15s backwards; }
+.suggestion:nth-child(4) { animation: fadeInUp 0.4s ease-out 0.2s backwards; }
+.suggestion:nth-child(5) { animation: fadeInUp 0.4s ease-out 0.25s backwards; }
+.suggestion:nth-child(6) { animation: fadeInUp 0.4s ease-out 0.3s backwards; }
+
+@keyframes fadeInUp {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 .suggestion::before {
