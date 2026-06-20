@@ -47,12 +47,12 @@ def test_auto_fallback_anthropic_sonnet():
     
     # Auto-fallback to Haiku
     assert cfg.fallback_provider == "anthropic"
-    assert cfg.fallback_model == "claude-3-5-haiku-20241022"
+    assert cfg.fallback_model == "claude-haiku-4-5"
     assert cfg.fallback_api_key == "test-key"
 
 
 def test_auto_fallback_openai_gpt4o():
-    """GPT-4o should auto-fallback to GPT-4o-mini."""
+    """GPT-4o should auto-fallback to GPT-5.4-mini."""
     os.environ["OPENAI_API_KEY"] = "test-key"
     cfg = AgentConfig.from_env(
         provider="openai",
@@ -64,7 +64,7 @@ def test_auto_fallback_openai_gpt4o():
     
     # Auto-fallback to mini
     assert cfg.fallback_provider == "openai"
-    assert cfg.fallback_model == "gpt-4o-mini"
+    assert cfg.fallback_model == "gpt-5.4-mini"
     assert cfg.fallback_api_key == "test-key"
 
 
@@ -122,7 +122,7 @@ def test_all_anthropic_models_have_fallback():
     """All major Anthropic models should have fallback configured."""
     major_models = [
         "claude-sonnet-4-20250514",
-        "claude-opus-4-20250514",
+        "claude-sonnet-4-6",
         "claude-3-5-sonnet-20241022",
     ]
     for model in major_models:
