@@ -1,8 +1,10 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { api } from "../api";
 import useTTS from "../hooks/useTTS";
-import type { Info } from "../types";
+import type { CatalogModel, Info, ModelCatalog } from "../types";
 
 const PROVIDERS = [
+  { id: "openrouter", name: "OpenRouter", requiresKey: true, recommended: true },
   { id: "anthropic", name: "Anthropic", requiresKey: true },
   { id: "openai", name: "OpenAI", requiresKey: true },
   { id: "groq", name: "Groq", requiresKey: true },
@@ -12,20 +14,114 @@ const PROVIDERS = [
   { id: "echo", name: "Echo (Debug)", requiresKey: false },
 ];
 
-const MODELS: Record<string, string[]> = {
-  anthropic: [
-    "claude-sonnet-4-20250514",
-    "claude-opus-4-20250514",
-    "claude-3-5-sonnet-20241022",
-    "claude-3-5-haiku-20241022",
-  ],
-  openai: ["gpt-4o", "gpt-4o-mini", "gpt-4-turbo", "gpt-3.5-turbo"],
-  groq: ["llama-3.3-70b-versatile", "mixtral-8x7b-32768"],
-  ollama: ["llama3.2", "llama3.1", "mistral", "codellama"],
-  lmstudio: ["custom-model"],
-  together: ["meta-llama/Meta-Llama-3.1-70B-Instruct-Turbo"],
-  echo: ["debug"],
-};
+// Per-token prices → friendly "$X/M tokens"; null when unknown/free.
+function formatPrice(perToken?: string | null): string | null {
+  if (perToken == null) return null;
+  const n = Number(perToken);
+  if (!isFinite(n)) return null;
+  if (n === 0) return "free";
+  const perM = n * 1_000_000;
+  return `$${perM >= 1 ? perM.toFixed(2) : perM.toPrecision(2)}/M`;
+}
+
+function formatContext(n?: number | null): string | null {
+  if (!n) return null;
+  return n >= 1000 ? `${Math.round(n / 1000)}K ctx` : `${n} ctx`;
+}
+
+function vendorOf(id: string): string {
+  const i = id.indexOf("/");
+  return i === -1 ? "other" : id.slice(0, i);
+}
+
+interface ModelPickerProps {
+  models: CatalogModel[];
+  value: string;
+  onChange: (id: string) => void;
+}
+
+// Searchable, grouped combobox over the live OpenRouter catalog. Defaults to
+// showing only tool-capable models because the agent relies on tool calls.
+function ModelPicker({ models, value, onChange }: ModelPickerProps) {
+  const [query, setQuery] = useState("");
+  const [toolsOnly, setToolsOnly] = useState(true);
+
+  const groups = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    const filtered = models.filter((m) => {
+      if (toolsOnly && !m.supports_tools) return false;
+      if (!q) return true;
+      return m.id.toLowerCase().includes(q) || m.name.toLowerCase().includes(q);
+    });
+    const byVendor = new Map<string, CatalogModel[]>();
+    for (const m of filtered) {
+      const v = vendorOf(m.id);
+      (byVendor.get(v) ?? byVendor.set(v, []).get(v)!).push(m);
+    }
+    return [...byVendor.entries()].sort((a, b) => a[0].localeCompare(b[0]));
+  }, [models, query, toolsOnly]);
+
+  const total = groups.reduce((n, [, list]) => n + list.length, 0);
+
+  return (
+    <div className="model-picker">
+      <div className="model-picker-bar">
+        <input
+          type="text"
+          className="settings-input"
+          placeholder="Search models (e.g. claude, gpt, gemini)…"
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+        />
+        <label className="model-picker-toggle">
+          <input
+            type="checkbox"
+            checked={toolsOnly}
+            onChange={(e) => setToolsOnly(e.target.checked)}
+          />
+          Tools only
+        </label>
+      </div>
+
+      {value && (
+        <div className="model-picker-selected">
+          Selected: <code>{value}</code>
+        </div>
+      )}
+
+      <div className="model-picker-list">
+        {total === 0 && <div className="model-picker-empty">No matching models.</div>}
+        {groups.map(([vendor, list]) => (
+          <div key={vendor} className="model-picker-group">
+            <div className="model-picker-group-head">{vendor}</div>
+            {list.map((m) => {
+              const ctx = formatContext(m.context_length);
+              const inPrice = formatPrice(m.prompt_price);
+              const outPrice = formatPrice(m.completion_price);
+              return (
+                <button
+                  key={m.id}
+                  type="button"
+                  className={`model-picker-row ${value === m.id ? "active" : ""}`}
+                  onClick={() => onChange(m.id)}
+                  title={m.id}
+                >
+                  <span className="model-picker-name">{m.name}</span>
+                  <span className="model-picker-badges">
+                    {ctx && <span className="model-badge">{ctx}</span>}
+                    {inPrice && <span className="model-badge">in {inPrice}</span>}
+                    {outPrice && <span className="model-badge">out {outPrice}</span>}
+                    {!m.supports_tools && <span className="model-badge warn">no tools</span>}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
 
 interface LLMSettingsProps {
   info: Info | null;
@@ -55,9 +151,21 @@ export function LLMSettings({ info, onClose }: LLMSettingsProps) {
   const [apiKey, setApiKey] = useState("");
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
+  const [catalog, setCatalog] = useState<ModelCatalog | null>(null);
+
+  useEffect(() => {
+    let alive = true;
+    api
+      .models()
+      .then((c) => alive && setCatalog(c))
+      .catch(() => alive && setCatalog({ source: "", fetched_at: null, count: 0, models: [] }));
+    return () => {
+      alive = false;
+    };
+  }, []);
 
   const selectedProvider = PROVIDERS.find((p) => p.id === provider);
-  const availableModels = MODELS[provider] || [];
+  const useCatalog = provider === "openrouter" && (catalog?.models.length ?? 0) > 0;
 
   const handleSave = async () => {
     setSaving(true);
@@ -128,6 +236,7 @@ export function LLMSettings({ info, onClose }: LLMSettingsProps) {
                   }}
                 >
                   <span className="provider-name">{p.name}</span>
+                  {p.recommended && <span className="provider-badge rec">Recommended</span>}
                   {!p.requiresKey && <span className="provider-badge">No key</span>}
                 </button>
               ))}
@@ -138,22 +247,21 @@ export function LLMSettings({ info, onClose }: LLMSettingsProps) {
             <label className="settings-label">
               Model
               <span className="settings-hint">
-                {availableModels.length > 0 ? "Select or enter custom model ID" : "Enter model ID"}
+                {useCatalog
+                  ? "Search the live OpenRouter catalog"
+                  : "Enter a model ID (leave empty for the provider default)"}
               </span>
             </label>
-            {availableModels.length > 0 ? (
-              <select
-                className="settings-input"
-                value={model}
-                onChange={(e) => setModel(e.target.value)}
-              >
-                <option value="">Default for provider</option>
-                {availableModels.map((m) => (
-                  <option key={m} value={m}>
-                    {m}
-                  </option>
-                ))}
-              </select>
+            {useCatalog ? (
+              <>
+                <ModelPicker models={catalog!.models} value={model} onChange={setModel} />
+                {catalog?.fetched_at && (
+                  <div className="settings-note">
+                    Catalog: {catalog.count} models · updated{" "}
+                    {new Date(catalog.fetched_at).toLocaleDateString()}
+                  </div>
+                )}
+              </>
             ) : (
               <input
                 type="text"

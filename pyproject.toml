@@ -72,3 +72,6 @@ Issues = "https://github.com/pieeg-club/PiEEG-agent/issues"
 
 [tool.setuptools.packages.find]
 include = ["pieeg_agent*"]
+
+[tool.setuptools.package-data]
+pieeg_agent = ["data/*.json"]

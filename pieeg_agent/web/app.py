@@ -201,6 +201,18 @@ def create_app(
         """List server webhook rules."""
         return await run_in_threadpool(engine.server_webhooks)
 
+    @app.get("/api/llm/models")
+    async def llm_models() -> dict:
+        """The committed OpenRouter model catalog (snapshot, always current).
+
+        Replaces the old hard-coded model lists: the front-end builds its model
+        picker from this, so deprecated IDs never linger in the UI. Refreshed
+        by the pre-commit hook via ``scripts/update_models.py``.
+        """
+        from ..llm.catalog import load_catalog
+
+        return load_catalog()
+
     @app.post("/api/llm/config")
     async def update_llm_config(request: Request) -> dict:
         """Update LLM configuration (runtime only, not persisted)."""

@@ -38,7 +38,7 @@ PROVIDERS: dict[str, dict] = {
         "kind": "anthropic",
         "env_key": "ANTHROPIC_API_KEY",
         "base_url": "https://api.anthropic.com",
-        "default_model": "claude-sonnet-4-20250514",
+        "default_model": "claude-3-5-sonnet-20241022",
     },
     "openai": {
         "label": "OpenAI",
@@ -46,6 +46,17 @@ PROVIDERS: dict[str, dict] = {
         "env_key": "OPENAI_API_KEY",
         "base_url": "https://api.openai.com/v1",
         "default_model": "gpt-4o-mini",
+    },
+    # OpenRouter is OpenAI-compatible and aggregates every major model behind
+    # one key. Its model IDs (e.g. "anthropic/claude-sonnet-4.6") are exactly
+    # the IDs in the committed catalog (pieeg_agent/data/openrouter_models.json),
+    # so the front-end picker maps 1:1 onto this provider with no translation.
+    "openrouter": {
+        "label": "OpenRouter",
+        "kind": "openai",
+        "env_key": "OPENROUTER_API_KEY",
+        "base_url": "https://openrouter.ai/api/v1",
+        "default_model": "anthropic/claude-sonnet-4.6",
     },
     "groq": {
         "label": "Groq",
@@ -99,8 +110,6 @@ DEFAULT_PROVIDER = "anthropic"
 AUTO_FALLBACK_MODELS: dict[str, dict[str, str]] = {
     # Anthropic: Sonnet/Opus → Haiku
     "anthropic": {
-        "claude-sonnet-4-20250514": "claude-3-5-haiku-20241022",
-        "claude-opus-4-20250514": "claude-3-5-haiku-20241022",
         "claude-3-5-sonnet-20241022": "claude-3-5-haiku-20241022",
         "claude-3-opus-20240229": "claude-3-5-haiku-20241022",
         "claude-3-sonnet-20240229": "claude-3-5-haiku-20241022",

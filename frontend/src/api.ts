@@ -1,4 +1,4 @@
-import type { Info, PatternExplain, PatternList, Snapshot } from "./types";
+import type { Info, ModelCatalog, PatternExplain, PatternList, Snapshot } from "./types";
 
 async function getJSON<T>(path: string): Promise<T> {
   const res = await fetch(path, { headers: { accept: "application/json" } });
@@ -25,6 +25,7 @@ async function postJSON<T>(path: string, body?: any): Promise<T> {
 // One-shot REST reads. The live surfaces use WebSockets instead (see hooks/).
 export const api = {
   info: () => getJSON<Info>("/api/info"),
+  models: () => getJSON<ModelCatalog>("/api/llm/models"),
   state: () => getJSON<Snapshot>("/api/state"),
   patterns: () => getJSON<PatternList>("/api/patterns"),
   explain: (name: string) =>

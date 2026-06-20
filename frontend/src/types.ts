@@ -11,6 +11,26 @@ export interface Info {
   control?: boolean;
 }
 
+// One model from the committed OpenRouter catalog
+// (pieeg_agent/data/openrouter_models.json), served via GET /api/llm/models.
+export interface CatalogModel {
+  id: string;
+  name: string;
+  context_length?: number | null;
+  prompt_price?: string | null;
+  completion_price?: string | null;
+  supports_tools?: boolean;
+  supports_reasoning?: boolean;
+  created?: number | null;
+}
+
+export interface ModelCatalog {
+  source: string;
+  fetched_at: string | null;
+  count: number;
+  models: CatalogModel[];
+}
+
 export interface NeuralState {
   status?: string; // "no_data" when the cascade hasn't produced a state yet
   detail?: string;

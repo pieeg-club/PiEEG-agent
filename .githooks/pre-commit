@@ -1,0 +1,30 @@
+#!/bin/sh
+# Refresh the OpenRouter model catalog on every commit so the shipped list
+# never goes stale. Offline-tolerant: the updater keeps the existing snapshot
+# and exits 0 on any network error, so commits are never blocked.
+#
+# Install once with: scripts/install-hooks.sh  (or scripts/install-hooks.cmd)
+
+set -e
+
+ROOT="$(git rev-parse --show-toplevel)"
+SNAPSHOT="pieeg_agent/data/openrouter_models.json"
+
+# Prefer an active virtualenv's python, fall back to python3 / python.
+if [ -n "$VIRTUAL_ENV" ] && [ -x "$VIRTUAL_ENV/bin/python" ]; then
+    PY="$VIRTUAL_ENV/bin/python"
+elif command -v python3 >/dev/null 2>&1; then
+    PY=python3
+else
+    PY=python
+fi
+
+"$PY" "$ROOT/scripts/update_models.py" || true
+
+# Stage the snapshot only if the updater actually changed it.
+if ! git diff --quiet -- "$SNAPSHOT" 2>/dev/null; then
+    git add "$SNAPSHOT"
+    echo "pre-commit: refreshed $SNAPSHOT"
+fi
+
+exit 0
