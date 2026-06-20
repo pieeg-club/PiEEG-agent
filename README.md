@@ -1,6 +1,7 @@
 <div align="center">
   
 # PiEEG-agent
+<img width="1672" height="941" alt="image" src="https://github.com/user-attachments/assets/bb6947f6-fd44-4039-a004-77b1d9303567" />
 
 [![Test](https://github.com/pieeg-club/PiEEG-agent/actions/workflows/test.yml/badge.svg)](https://github.com/pieeg-club/PiEEG-agent/actions/workflows/test.yml)
 [![Python](https://img.shields.io/badge/python-3.10%2B-blue)](https://www.python.org/)
