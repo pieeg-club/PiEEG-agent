@@ -2,28 +2,42 @@ import { useEffect, useState } from "react";
 import useTTS from "../hooks/useTTS";
 import type { Info } from "../types";
 
-const PROVIDERS = [
-  { id: "anthropic", name: "Anthropic", requiresKey: true },
-  { id: "openai", name: "OpenAI", requiresKey: true },
-  { id: "groq", name: "Groq", requiresKey: true },
-  { id: "together", name: "Together AI", requiresKey: true },
-  { id: "ollama", name: "Ollama (Local)", requiresKey: false },
-  { id: "lmstudio", name: "LM Studio (Local)", requiresKey: false },
-  { id: "echo", name: "Echo (Debug)", requiresKey: false },
+// Fallback providers list if backend doesn't send availableProviders
+const FALLBACK_PROVIDERS = [
+  { id: "anthropic", name: "Anthropic", requiresKey: true, defaultModel: "claude-sonnet-4-6" },
+  { id: "openai", name: "OpenAI", requiresKey: true, defaultModel: "gpt-5.4-mini" },
+  { id: "groq", name: "Groq", requiresKey: true, defaultModel: "llama-3.3-70b-versatile" },
+  { id: "together", name: "Together AI", requiresKey: true, defaultModel: "meta-llama/Llama-3.3-70B-Instruct-Turbo" },
+  { id: "ollama", name: "Ollama (Local)", requiresKey: false, defaultModel: "llama3.1" },
+  { id: "lmstudio", name: "LM Studio (Local)", requiresKey: false, defaultModel: "local-model" },
+  { id: "echo", name: "Echo (Debug)", requiresKey: false, defaultModel: "echo-debug-v1" },
 ];
 
-const MODELS: Record<string, string[]> = {
+// Common models per provider - used for quick model selection dropdown
+const COMMON_MODELS: Record<string, string[]> = {
   anthropic: [
+    "claude-sonnet-4-6",
+    "claude-opus-4-8",
+    "claude-haiku-4-5",
+    "claude-fable-5",
+    // Legacy models for backwards compat
     "claude-sonnet-4-20250514",
-    "claude-opus-4-20250514",
     "claude-3-5-sonnet-20241022",
     "claude-3-5-haiku-20241022",
   ],
-  openai: ["gpt-4o", "gpt-4o-mini", "gpt-4-turbo", "gpt-3.5-turbo"],
-  groq: ["llama-3.3-70b-versatile", "mixtral-8x7b-32768"],
+  openai: [
+    "gpt-5.5",
+    "gpt-5.4",
+    "gpt-5.4-mini",
+    // Legacy models for backwards compat
+    "gpt-4o",
+    "gpt-4o-mini",
+    "gpt-4-turbo",
+  ],
+  groq: ["llama-3.3-70b-versatile", "llama-3.1-8b-instant", "openai/gpt-oss-120b", "mixtral-8x7b-32768"],
   ollama: ["llama3.2", "llama3.1", "mistral", "codellama"],
   lmstudio: ["custom-model"],
-  together: ["meta-llama/Meta-Llama-3.1-70B-Instruct-Turbo"],
+  together: ["meta-llama/Llama-3.3-70B-Instruct-Turbo", "meta-llama/Llama-3.1-8B-Instruct-Turbo"],
   echo: ["debug"],
 };
 
@@ -50,14 +64,15 @@ function TTSControl() {
 }
 
 export function LLMSettings({ info, onClose }: LLMSettingsProps) {
+  const providers = info?.availableProviders || FALLBACK_PROVIDERS;
   const [provider, setProvider] = useState(info?.provider || "anthropic");
   const [model, setModel] = useState(info?.model || "");
   const [apiKey, setApiKey] = useState("");
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
 
-  const selectedProvider = PROVIDERS.find((p) => p.id === provider);
-  const availableModels = MODELS[provider] || [];
+  const selectedProvider = providers.find((p) => p.id === provider);
+  const availableModels = COMMON_MODELS[provider] || [];
 
   const handleSave = async () => {
     setSaving(true);
@@ -118,7 +133,7 @@ export function LLMSettings({ info, onClose }: LLMSettingsProps) {
               <span className="settings-hint">Choose your LLM backend</span>
             </label>
             <div className="provider-grid">
-              {PROVIDERS.map((p) => (
+              {providers.map((p) => (
                 <button
                   key={p.id}
                   className={`provider-card ${provider === p.id ? "active" : ""}`}

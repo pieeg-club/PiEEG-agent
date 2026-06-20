@@ -38,21 +38,21 @@ PROVIDERS: dict[str, dict] = {
         "kind": "anthropic",
         "env_key": "ANTHROPIC_API_KEY",
         "base_url": "https://api.anthropic.com",
-        "default_model": "claude-sonnet-4-20250514",
+        "default_model": "claude-sonnet-4-6",  # Latest Sonnet (Jun 2026)
     },
     "openai": {
         "label": "OpenAI",
         "kind": "openai",
         "env_key": "OPENAI_API_KEY",
         "base_url": "https://api.openai.com/v1",
-        "default_model": "gpt-4o-mini",
+        "default_model": "gpt-5.4-mini",  # Latest mini model (Jun 2026)
     },
     "groq": {
         "label": "Groq",
         "kind": "openai",
         "env_key": "GROQ_API_KEY",
         "base_url": "https://api.groq.com/openai/v1",
-        "default_model": "llama-3.3-70b-versatile",
+        "default_model": "llama-3.3-70b-versatile",  # Production model
     },
     "together": {
         "label": "Together AI",
@@ -97,21 +97,27 @@ DEFAULT_PROVIDER = "anthropic"
 # a different provider (e.g. an OpenAI model name configured against Together).
 
 AUTO_FALLBACK_MODELS: dict[str, dict[str, str]] = {
-    # Anthropic: Sonnet/Opus → Haiku
+    # Anthropic: Sonnet/Opus/Fable → Haiku (Jun 2026 models)
     "anthropic": {
-        "claude-sonnet-4-20250514": "claude-3-5-haiku-20241022",
-        "claude-opus-4-20250514": "claude-3-5-haiku-20241022",
-        "claude-3-5-sonnet-20241022": "claude-3-5-haiku-20241022",
-        "claude-3-opus-20240229": "claude-3-5-haiku-20241022",
-        "claude-3-sonnet-20240229": "claude-3-5-haiku-20241022",
+        "claude-fable-5": "claude-haiku-4-5",           # Fable → Haiku
+        "claude-opus-4-8": "claude-haiku-4-5",          # Opus → Haiku
+        "claude-sonnet-4-6": "claude-haiku-4-5",        # Sonnet → Haiku
+        "claude-opus-4-7": "claude-haiku-4-5",          # Legacy Opus → Haiku
+        "claude-opus-4-6": "claude-haiku-4-5",          # Legacy Opus → Haiku
+        "claude-sonnet-4-5": "claude-haiku-4-5",        # Legacy Sonnet → Haiku
+        "claude-sonnet-4-20250514": "claude-haiku-4-5", # Very old Sonnet → Haiku
+        "claude-3-5-sonnet-20241022": "claude-haiku-4-5",
+        "claude-3-opus-20240229": "claude-haiku-4-5",
     },
-    # OpenAI: GPT-4 → GPT-4o-mini
+    # OpenAI: GPT-5.x → GPT-5.4-mini (Jun 2026 models)
     "openai": {
-        "gpt-4o": "gpt-4o-mini",
-        "gpt-4-turbo": "gpt-4o-mini",
-        "gpt-4": "gpt-4o-mini",
-        "o1": "gpt-4o-mini",
-        "o1-mini": "gpt-4o-mini",
+        "gpt-5.5": "gpt-5.4-mini",        # Flagship → mini
+        "gpt-5.4": "gpt-5.4-mini",        # Affordable → mini
+        "gpt-4o": "gpt-5.4-mini",         # Legacy GPT-4o → mini
+        "gpt-4-turbo": "gpt-5.4-mini",   # Legacy GPT-4 → mini
+        "gpt-4": "gpt-5.4-mini",          # Legacy GPT-4 → mini
+        "o1": "gpt-5.4-mini",             # Legacy o1 → mini
+        "o1-mini": "gpt-5.4-mini",        # Legacy o1-mini → mini
     },
     # Groq: 70B → 8B
     "groq": {
@@ -170,10 +176,25 @@ class AgentConfig:
           PIEEG_WS_URL, PIEEG_DASHBOARD_URL,
           plus the selected provider's API-key variable (e.g. ANTHROPIC_API_KEY).
 
+        Also reads from saved config file (~/.pieeg-agent/config.json) if it exists.
+        Priority: overrides > env vars > saved config > defaults.
+
         ``overrides`` (keyword args) win over the environment and are meant
         for CLI flags. ``None`` overrides are ignored so callers can pass
         optional flags unconditionally.
         """
+        # Load saved config from disk if it exists
+        from pathlib import Path
+        import json
+        saved_config = {}
+        config_path = Path.home() / ".pieeg-agent" / "config.json"
+        if config_path.exists():
+            try:
+                with open(config_path, "r") as f:
+                    saved_config = json.load(f)
+            except (json.JSONDecodeError, IOError):
+                pass
+        
         g = os.environ.get
         data: dict = dict(
             lsl_name=g("PIEEG_LSL_NAME", "PiEEG"),
@@ -181,13 +202,17 @@ class AgentConfig:
             lsl_resolve_by=g("PIEEG_LSL_RESOLVE_BY", "type"),
             lsl_resolve_timeout=_as_float(g("PIEEG_LSL_RESOLVE_TIMEOUT"), 5.0),
             ring_seconds=_as_float(g("PIEEG_RING_SECONDS"), 60.0),
-            provider=g("PIEEG_LLM_PROVIDER", DEFAULT_PROVIDER),
-            model=g("PIEEG_LLM_MODEL", ""),
+            provider=g("PIEEG_LLM_PROVIDER", saved_config.get("provider", DEFAULT_PROVIDER)),
+            model=g("PIEEG_LLM_MODEL", saved_config.get("model", "")),
             fallback_provider=g("PIEEG_LLM_FALLBACK_PROVIDER", ""),
             fallback_model=g("PIEEG_LLM_FALLBACK_MODEL", ""),
             ws_url=g("PIEEG_WS_URL", "ws://localhost:1616"),
             dashboard_url=g("PIEEG_DASHBOARD_URL", "http://localhost:1617"),
         )
+        # API key from saved config only if not in env
+        if saved_config.get("api_key") and not os.environ.get("ANTHROPIC_API_KEY") and not os.environ.get("OPENAI_API_KEY"):
+            data["api_key"] = saved_config["api_key"]
+        
         data.update({k: v for k, v in overrides.items() if v is not None})
         cfg = cls(**data)
         cfg._resolve_provider_defaults()

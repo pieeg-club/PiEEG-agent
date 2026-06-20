@@ -2,6 +2,13 @@
 // tool serializers in pieeg_agent/agent/tools.py and decode_tools.py and the
 // WebEngine.snapshot() assembly — keep them in sync if those change.
 
+export interface ProviderInfo {
+  id: string;
+  name: string;
+  requiresKey: boolean;
+  defaultModel: string;
+}
+
 export interface Info {
   stream?: string;
   channels?: number;
@@ -9,6 +16,7 @@ export interface Info {
   provider?: string;
   model?: string;
   control?: boolean;
+  availableProviders?: ProviderInfo[];
 }
 
 export interface NeuralState {

@@ -53,7 +53,7 @@ def _load_saved_config() -> dict | None:
         return None
 
 
-def _save_config(provider: str, api_key: str) -> bool:
+def _save_config(provider: str, api_key: str, model: str = "") -> bool:
     """Save provider configuration to disk.
     
     Returns True if saved successfully, False otherwise.
@@ -65,8 +65,11 @@ def _save_config(provider: str, api_key: str) -> bool:
         data = {
             "provider": provider,
             "api_key": api_key,
-            "version": 1,
+            "version": 2,  # Bumped to v2 for model field
         }
+        if model:
+            data["model"] = model
+        
         with open(config_path, "w") as f:
             json.dump(data, f, indent=2)
         
@@ -1182,8 +1185,21 @@ def cmd_web(args) -> int:
         return 1
 
     from .web import WebEngine, create_app
+    from .config import PROVIDERS
 
     inlet = started.inlet
+    
+    # Build available providers list (id, name, requiresKey)
+    available_providers = [
+        {
+            "id": pid,
+            "name": spec["label"],
+            "requiresKey": bool(spec.get("env_key")),
+            "defaultModel": spec["default_model"],
+        }
+        for pid, spec in PROVIDERS.items()
+    ]
+    
     info = {
         "stream": inlet.stream_name,
         "channels": inlet.num_channels,
@@ -1191,6 +1207,7 @@ def cmd_web(args) -> int:
         "provider": started.cfg.provider,
         "model": started.cfg.model,
         "control": started.client is not None,
+        "availableProviders": available_providers,
     }
     engine = WebEngine(
         copilot=started.copilot,

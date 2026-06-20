@@ -34,7 +34,31 @@ export default function App() {
   const [explain, setExplain] = useState<{ name: string; data: PatternExplain | null } | null>(null);
 
   useEffect(() => {
-    api.info().then(setInfo).catch(() => {});
+    let retryCount = 0;
+    const maxRetries = 5;
+    const retryDelay = 1000;
+
+    const fetchInfo = async () => {
+      try {
+        const data = await api.info();
+        // Validate that we got valid data
+        if (data && typeof data === 'object') {
+          setInfo(data);
+        } else {
+          throw new Error('Invalid info response');
+        }
+      } catch (err) {
+        console.warn('[App] Failed to fetch /api/info:', err);
+        retryCount++;
+        if (retryCount < maxRetries) {
+          setTimeout(fetchInfo, retryDelay * retryCount);
+        } else {
+          console.error('[App] Failed to fetch /api/info after', maxRetries, 'attempts');
+        }
+      }
+    };
+
+    fetchInfo();
   }, []);
 
   const openExplain = async (name: string) => {

@@ -106,7 +106,19 @@ def create_app(
 
     @app.get("/api/info")
     async def info() -> dict:
-        return engine.info()
+        try:
+            return engine.info()
+        except Exception as e:
+            # Return minimal valid response if engine.info() fails
+            return {
+                "stream": None,
+                "channels": None,
+                "rate": None,
+                "provider": None,
+                "model": None,
+                "control": False,
+                "error": str(e),
+            }
 
     @app.get("/api/state")
     async def state() -> dict:
@@ -202,14 +214,22 @@ def create_app(
         return await run_in_threadpool(engine.server_webhooks)
 
     @app.post("/api/llm/config")
-    async def update_llm_config(request: Request) -> dict:
-        """Update LLM configuration (runtime only, not persisted)."""
-        # This endpoint allows runtime configuration changes.
-        # For permanent config, users should set environment variables.
-        data = await request.json()
+    async def update_llm_config(request: Request) -> JSONResponse:
+        """Save LLM configuration to disk (~/.pieeg-agent/config.json).
+        
+        Requires server restart to take effect.
+        """
+        try:
+            data = await request.json()
+        except Exception as e:
+            return JSONResponse(
+                {"detail": f"Invalid JSON: {e}"}, 
+                status_code=400
+            )
+        
         provider = data.get("provider")
-        model = data.get("model")
-        api_key = data.get("api_key")
+        model = data.get("model", "")
+        api_key = data.get("api_key", "")
         
         # Validation: provider is required
         if not provider:
@@ -218,14 +238,40 @@ def create_app(
                 status_code=400
             )
         
-        # Note: This is a runtime-only change. For production use,
-        # implement persistent configuration storage or use env vars.
-        return {
-            "status": "configuration received",
-            "note": "Runtime config not yet implemented. Set PIEEG_LLM_PROVIDER, PIEEG_LLM_MODEL, and API keys via environment variables and restart.",
-            "provider": provider,
-            "model": model or "default",
-        }
+        # Save to disk using existing helper
+        from pathlib import Path
+        import json, os
+        
+        config_path = Path.home() / ".pieeg-agent" / "config.json"
+        config_path.parent.mkdir(parents=True, exist_ok=True)
+        
+        try:
+            save_data = {
+                "provider": provider,
+                "version": 2,
+            }
+            if api_key:
+                save_data["api_key"] = api_key
+            if model:
+                save_data["model"] = model
+            
+            with open(config_path, "w") as f:
+                json.dump(save_data, f, indent=2)
+            
+            # Set restrictive permissions (owner read/write only)
+            if hasattr(os, "chmod"):
+                os.chmod(config_path, 0o600)
+            
+            return JSONResponse({
+                "status": "saved",
+                "message": "Configuration saved to disk. Restart required to take effect.",
+                "path": str(config_path),
+            })
+        except (IOError, OSError) as e:
+            return JSONResponse(
+                {"detail": f"Failed to save configuration: {e}"}, 
+                status_code=500
+            )
 
     # ── WS: live brain telemetry (server-push) ───────────────────────────
     @app.websocket("/ws/live")
