@@ -65,10 +65,10 @@ class OpenAICompatProvider(LLMProvider):
 
         payload: dict = {
             "model": self.model,
-            "max_tokens": max_tokens,
             "temperature": temperature,
             "messages": wire,
         }
+        payload[_max_tokens_field(self.model)] = max_tokens
         if tools:
             payload["tools"] = [_encode_tool(t) for t in tools]
 
@@ -95,7 +95,6 @@ class OpenAICompatProvider(LLMProvider):
 
         payload: dict = {
             "model": self.model,
-            "max_tokens": max_tokens,
             "temperature": temperature,
             "messages": wire,
             "stream": True,
@@ -103,6 +102,7 @@ class OpenAICompatProvider(LLMProvider):
             # ignore the field, so token counts are best-effort while streaming.
             "stream_options": {"include_usage": True},
         }
+        payload[_max_tokens_field(self.model)] = max_tokens
         if tools:
             payload["tools"] = [_encode_tool(t) for t in tools]
 
@@ -174,6 +174,21 @@ class OpenAICompatProvider(LLMProvider):
 
 
 # ── wire encoding ───────────────────────────────────────────────────────────
+
+
+def _max_tokens_field(model: str) -> str:
+    """Return the output-token limit field name for ``model``.
+
+    Newer OpenAI models (gpt-5, o1/o3/o4 reasoning family, …) reject the legacy
+    ``max_tokens`` field and require ``max_completion_tokens`` instead. Other
+    OpenAI-compatible back-ends (Groq, Together, Ollama, …) still expect
+    ``max_tokens``, so we only switch for the OpenAI model families that need it.
+    """
+    name = (model or "").lower()
+    prefixes = ("gpt-5", "o1", "o1-", "o3", "o3-", "o4", "o4-")
+    if name.startswith(prefixes):
+        return "max_completion_tokens"
+    return "max_tokens"
 
 
 def _encode_tool(tool: ToolSpec) -> dict:
