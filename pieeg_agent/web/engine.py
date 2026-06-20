@@ -13,7 +13,10 @@ engine is unit-testable without a server, and the transport in
 
 from __future__ import annotations
 
+import json
+import os
 import threading
+from pathlib import Path
 from typing import Any, Iterator, Protocol
 
 from ..agent.copilot import CopilotEvent
@@ -71,6 +74,7 @@ class WebEngine:
         info: dict | None = None,
         actions: Any | None = None,
         utility: _Toolset | None = None,
+        config: Any | None = None,
     ):
         self._copilot = copilot
         self._senses = senses
@@ -78,12 +82,92 @@ class WebEngine:
         self._info = dict(info or {})
         self._actions = actions
         self._utility = utility
+        self._config = config
         self._chat_lock = threading.Lock()
 
     # ── metadata ─────────────────────────────────────────────────────────
     def info(self) -> dict:
         """Static session facts: stream name, channels, rate, provider/model."""
         return dict(self._info)
+
+    def update_llm_config(self, provider: str, model: str | None = None, api_key: str | None = None) -> dict:
+        """Update LLM provider/model at runtime without restart.
+        
+        Creates a new provider, updates the copilot, persists to config file,
+        and updates the info dict. Returns success status or error detail.
+        """
+        from ..config import PROVIDERS, AgentConfig
+        from ..llm import get_provider, ProviderError
+        
+        # Validate provider exists
+        if provider not in PROVIDERS:
+            known = ", ".join(sorted(PROVIDERS))
+            return {"error": f"Unknown provider {provider!r}. Known: {known}"}
+        
+        # Set API key in environment if provided
+        spec = PROVIDERS[provider]
+        env_key = spec.get("env_key", "")
+        if api_key and env_key:
+            os.environ[env_key] = api_key
+        
+        # Build new config
+        try:
+            # Reuse existing config if available, otherwise create minimal one
+            if self._config:
+                new_cfg = AgentConfig(
+                    lsl_name=self._config.lsl_name,
+                    lsl_type=self._config.lsl_type,
+                    lsl_resolve_by=self._config.lsl_resolve_by,
+                    provider=provider,
+                    model=model or "",
+                    ring_seconds=self._config.ring_seconds,
+                )
+            else:
+                new_cfg = AgentConfig(provider=provider, model=model or "")
+            
+            # Create new provider
+            new_provider = get_provider(new_cfg, timeout=60.0)
+            
+            # Update copilot's provider (needs to access private attr)
+            # The copilot accepts this since it's designed for fallback switching
+            if hasattr(self._copilot, "_provider"):
+                self._copilot._provider = new_provider  # type: ignore
+                self._copilot._active_provider = new_provider  # type: ignore
+                self._copilot._fallback_active = False  # type: ignore
+            
+            # Update info dict
+            self._info["provider"] = provider
+            self._info["model"] = new_cfg.model
+            self._config = new_cfg
+            
+            # Persist to ~/.pieeg-agent/config.json
+            config_path = Path.home() / ".pieeg-agent" / "config.json"
+            config_path.parent.mkdir(parents=True, exist_ok=True)
+            
+            config_data = {
+                "provider": provider,
+                "version": 1,
+            }
+            if model:
+                config_data["model"] = model
+            if api_key:
+                config_data["api_key"] = api_key
+            
+            config_path.write_text(json.dumps(config_data, indent=2))
+            if hasattr(os, "chmod"):  # Unix-like systems
+                os.chmod(config_path, 0o600)
+            
+            return {
+                "status": "success",
+                "provider": provider,
+                "model": new_cfg.model,
+                "message": "Configuration updated successfully"
+            }
+            
+        except ProviderError as e:
+            return {"error": str(e)}
+        except Exception as e:
+            return {"error": f"Failed to update configuration: {e}"}
 
     # ── live state ───────────────────────────────────────────────────────
     def snapshot(self) -> dict:

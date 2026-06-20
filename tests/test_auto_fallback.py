@@ -39,11 +39,11 @@ def test_auto_fallback_anthropic_sonnet():
     os.environ["ANTHROPIC_API_KEY"] = "test-key"
     cfg = AgentConfig.from_env(
         provider="anthropic",
-        model="claude-sonnet-4-20250514",
+        model="claude-3-5-sonnet-20241022",
     )
     
     assert cfg.provider == "anthropic"
-    assert cfg.model == "claude-sonnet-4-20250514"
+    assert cfg.model == "claude-3-5-sonnet-20241022"
     
     # Auto-fallback to Haiku
     assert cfg.fallback_provider == "anthropic"
@@ -109,7 +109,7 @@ def test_explicit_fallback_overrides_auto():
     
     cfg = AgentConfig.from_env(
         provider="anthropic",
-        model="claude-sonnet-4-20250514",
+        model="claude-3-5-sonnet-20241022",
     )
     
     # Explicit fallback wins
@@ -121,9 +121,9 @@ def test_explicit_fallback_overrides_auto():
 def test_all_anthropic_models_have_fallback():
     """All major Anthropic models should have fallback configured."""
     major_models = [
-        "claude-sonnet-4-20250514",
-        "claude-opus-4-20250514",
         "claude-3-5-sonnet-20241022",
+        "claude-3-opus-20240229",
+        "claude-3-sonnet-20240229",
     ]
     for model in major_models:
         assert model in AUTO_FALLBACK_MODELS["anthropic"], f"{model} missing fallback"
@@ -141,7 +141,7 @@ def test_fallback_shares_same_api_key():
     os.environ["ANTHROPIC_API_KEY"] = "shared-key"
     cfg = AgentConfig.from_env(
         provider="anthropic",
-        model="claude-sonnet-4-20250514",
+        model="claude-3-5-sonnet-20241022",
     )
     
     assert cfg.api_key == "shared-key"

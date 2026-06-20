@@ -215,9 +215,7 @@ def create_app(
 
     @app.post("/api/llm/config")
     async def update_llm_config(request: Request) -> dict:
-        """Update LLM configuration (runtime only, not persisted)."""
-        # This endpoint allows runtime configuration changes.
-        # For permanent config, users should set environment variables.
+        """Update LLM configuration at runtime (persists to disk, no restart needed)."""
         data = await request.json()
         provider = data.get("provider")
         model = data.get("model")
@@ -230,14 +228,21 @@ def create_app(
                 status_code=400
             )
         
-        # Note: This is a runtime-only change. For production use,
-        # implement persistent configuration storage or use env vars.
-        return {
-            "status": "configuration received",
-            "note": "Runtime config not yet implemented. Set PIEEG_LLM_PROVIDER, PIEEG_LLM_MODEL, and API keys via environment variables and restart.",
-            "provider": provider,
-            "model": model or "default",
-        }
+        # Call the engine's update method
+        result = await run_in_threadpool(
+            engine.update_llm_config,
+            provider,
+            model,
+            api_key
+        )
+        
+        if "error" in result:
+            return JSONResponse(
+                {"detail": result["error"]},
+                status_code=400
+            )
+        
+        return result
 
     # ── WS: live brain telemetry (server-push) ───────────────────────────
     @app.websocket("/ws/live")

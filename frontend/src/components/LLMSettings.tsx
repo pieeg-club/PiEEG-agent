@@ -146,7 +146,7 @@ function TTSControl() {
 }
 
 export function LLMSettings({ info, onClose }: LLMSettingsProps) {
-  const [provider, setProvider] = useState(info?.provider || "anthropic");
+  const [provider, setProvider] = useState(info?.provider || "openrouter");
   const [model, setModel] = useState(info?.model || "");
   const [apiKey, setApiKey] = useState("");
   const [saving, setSaving] = useState(false);
@@ -187,10 +187,11 @@ export function LLMSettings({ info, onClose }: LLMSettingsProps) {
         throw new Error(error.detail || "Failed to save configuration");
       }
 
-      setMessage({ type: "success", text: "Configuration saved. Restart required." });
+      setMessage({ type: "success", text: "Configuration saved and applied!" });
       setTimeout(() => {
         onClose();
-      }, 2000);
+        window.location.reload();  // Refresh to show new provider/model in header
+      }, 1500);
     } catch (err) {
       setMessage({
         type: "error",

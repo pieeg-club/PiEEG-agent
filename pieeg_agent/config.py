@@ -38,7 +38,7 @@ PROVIDERS: dict[str, dict] = {
         "kind": "anthropic",
         "env_key": "ANTHROPIC_API_KEY",
         "base_url": "https://api.anthropic.com",
-        "default_model": "claude-3-5-sonnet-20241022",
+        "default_model": "claude-3-5-sonnet-20241022",  # Fallback if catalog fails
     },
     "openai": {
         "label": "OpenAI",
@@ -51,12 +51,13 @@ PROVIDERS: dict[str, dict] = {
     # one key. Its model IDs (e.g. "anthropic/claude-sonnet-4.6") are exactly
     # the IDs in the committed catalog (pieeg_agent/data/openrouter_models.json),
     # so the front-end picker maps 1:1 onto this provider with no translation.
+    # PREFERRED: Use OpenRouter - it has -latest aliases that auto-track new models.
     "openrouter": {
         "label": "OpenRouter",
         "kind": "openai",
         "env_key": "OPENROUTER_API_KEY",
         "base_url": "https://openrouter.ai/api/v1",
-        "default_model": "anthropic/claude-sonnet-4.6",
+        "default_model": "~anthropic/claude-sonnet-latest",  # Auto-tracking alias
     },
     "groq": {
         "label": "Groq",
@@ -95,26 +96,30 @@ PROVIDERS: dict[str, dict] = {
     },
 }
 
-DEFAULT_PROVIDER = "anthropic"
+DEFAULT_PROVIDER = "openrouter"
 
 # ── Automatic fallback model mapping ───────────────────────────────────────
 #
 # When rate limits or errors occur, the system can automatically fall back to
-# a smaller/cheaper model from the same provider. This mapping defines the
-# automatic fallback for common models. Users can override with env vars.
+# a smaller/cheaper model from the same provider. 
 #
-# Keyed by ``provider`` first, then by primary ``model``. Keying by provider
-# avoids selecting an invalid fallback when the same model string is used with
-# a different provider (e.g. an OpenAI model name configured against Together).
+# SINGLE SOURCE OF TRUTH: The OpenRouter catalog (auto-updated by pre-commit hook).
+# These mappings are ONLY for direct API providers (anthropic, openai, groq, together)
+# that don't have -latest aliases. OpenRouter uses dynamic catalog lookup.
+#
+# See: https://docs.anthropic.com/en/docs/resources-and-support/deprecations
+# Anthropic deprecates models ~6 months after replacement, so these will need
+# periodic updates. Use OpenRouter to avoid this entirely.
 
 AUTO_FALLBACK_MODELS: dict[str, dict[str, str]] = {
-    # Anthropic: Sonnet/Opus → Haiku
+    # Anthropic direct API: Sonnet/Opus → Haiku
+    # These are actual API model names, NOT OpenRouter IDs
     "anthropic": {
         "claude-3-5-sonnet-20241022": "claude-3-5-haiku-20241022",
         "claude-3-opus-20240229": "claude-3-5-haiku-20241022",
         "claude-3-sonnet-20240229": "claude-3-5-haiku-20241022",
     },
-    # OpenAI: GPT-4 → GPT-4o-mini
+    # OpenAI direct API: GPT-4 → mini
     "openai": {
         "gpt-4o": "gpt-4o-mini",
         "gpt-4-turbo": "gpt-4o-mini",
@@ -133,6 +138,7 @@ AUTO_FALLBACK_MODELS: dict[str, dict[str, str]] = {
         "meta-llama/Llama-3.3-70B-Instruct-Turbo": "meta-llama/Llama-3.1-8B-Instruct-Turbo",
         "meta-llama/Llama-3.1-70B-Instruct-Turbo": "meta-llama/Llama-3.1-8B-Instruct-Turbo",
     },
+    # OpenRouter: Uses dynamic catalog lookup via find_fallback() - no hardcoded mappings needed
 }
 
 
@@ -206,7 +212,10 @@ class AgentConfig:
         """Fill blank model / base_url / api_key from the registry + env.
         
         Also automatically configures fallback to a smaller model from the same
-        provider if no explicit fallback is configured.
+        provider if no explicit fallback is configured. Tries (in order):
+        1. Explicit fallback provider/model from env vars
+        2. Hardcoded AUTO_FALLBACK_MODELS mapping
+        3. Dynamic catalog-based fallback (OpenRouter only)
         """
         # Primary provider
         spec = PROVIDERS.get(self.provider)
@@ -236,6 +245,16 @@ class AgentConfig:
             self.fallback_model = AUTO_FALLBACK_MODELS[self.provider][self.model]
             self.fallback_base_url = self.base_url
             self.fallback_api_key = self.api_key
+        
+        # Dynamic catalog-based fallback (OpenRouter only - has the catalog)
+        elif self.provider == "openrouter":
+            from .llm.catalog import find_fallback
+            fallback = find_fallback(self.model)
+            if fallback:
+                self.fallback_provider = self.provider
+                self.fallback_model = fallback
+                self.fallback_base_url = self.base_url
+                self.fallback_api_key = self.api_key
 
     # ── Introspection helpers ──────────────────────────────────────────
     @property

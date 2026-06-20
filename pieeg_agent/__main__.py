@@ -1199,6 +1199,7 @@ def cmd_web(args) -> int:
         info=info,
         actions=started.actions,
         utility=started.utility,
+        config=started.cfg,
     )
     static_dir = args.static_dir or _default_static_dir()
     app = create_app(engine, static_dir=static_dir)
