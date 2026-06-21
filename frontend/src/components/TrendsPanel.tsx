@@ -80,7 +80,7 @@ function bucketize(points: TrendPoint[], start: number, end: number): Bucket[] {
     if (!slot) continue;
     const b: Record<string, number> = { t: slot.tsum / slot.n };
     for (const k of AVG_KEYS) b[k] = slot.sum[k] / slot.n;
-    out.push(b as Bucket);
+    out.push(b as unknown as Bucket);
   }
   return out;
 }
