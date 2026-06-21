@@ -44,6 +44,7 @@ const COMMON_MODELS: Record<string, string[]> = {
 interface LLMSettingsProps {
   info: Info | null;
   onClose: () => void;
+  onSaved?: () => void;
 }
 
 function TTSControl() {
@@ -63,7 +64,7 @@ function TTSControl() {
   );
 }
 
-export function LLMSettings({ info, onClose }: LLMSettingsProps) {
+export function LLMSettings({ info, onClose, onSaved }: LLMSettingsProps) {
   const providers = info?.availableProviders || FALLBACK_PROVIDERS;
   const [provider, setProvider] = useState(info?.provider || "anthropic");
   const [model, setModel] = useState(info?.model || "");
@@ -95,6 +96,7 @@ export function LLMSettings({ info, onClose }: LLMSettingsProps) {
       }
 
       setMessage({ type: "success", text: "Configuration saved. Restart required." });
+      onSaved?.();
       setTimeout(() => {
         onClose();
       }, 2000);

@@ -282,6 +282,12 @@ def create_app(
             if hasattr(os, "chmod"):
                 os.chmod(config_path, 0o600)
             
+            # Update in-memory info so /api/info reflects the saved values
+            # immediately (without requiring a page-refresh race against the
+            # old startup snapshot).
+            engine._info["provider"] = provider
+            engine._info["model"] = save_data.get("model", "")
+            
             return JSONResponse({
                 "status": "saved",
                 "message": "Configuration saved to disk. Restart required to take effect.",

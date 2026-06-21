@@ -36,6 +36,17 @@ export default function App() {
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [explain, setExplain] = useState<{ name: string; data: PatternExplain | null } | null>(null);
 
+  const refreshInfo = async () => {
+    try {
+      const data = await api.info();
+      if (data && typeof data === 'object') {
+        setInfo(data);
+      }
+    } catch (err) {
+      console.warn('[App] Failed to fetch /api/info:', err);
+    }
+  };
+
   useEffect(() => {
     let retryCount = 0;
     const maxRetries = 5;
@@ -128,7 +139,7 @@ export default function App() {
       {explain && (
         <PatternModal name={explain.name} data={explain.data} onClose={() => setExplain(null)} />
       )}
-      {showSettings && <LLMSettings info={info} onClose={() => setShowSettings(false)} />}
+      {showSettings && <LLMSettings info={info} onClose={() => setShowSettings(false)} onSaved={refreshInfo} />}
       {showSystem && <SystemControl onClose={() => setShowSystem(false)} />}
       <ConversationList
         currentId={chat.conversationId}
