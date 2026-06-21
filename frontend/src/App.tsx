@@ -13,10 +13,12 @@ import { PatternTicker } from "./components/PatternTicker";
 import { SystemControl } from "./components/SystemControl";
 import { toast, ToastContainer } from "./components/Toast";
 import { TrainingOverlay } from "./components/TrainingOverlay";
+import { TrendsCard } from "./components/TrendsCard";
 import { useChatSocket } from "./hooks/useChatSocket";
 import { useLogsCapture } from "./hooks/useLogsCapture";
 import { useLiveSocket } from "./hooks/useLiveSocket";
 import { useTrainSocket } from "./hooks/useTrainSocket";
+import { useTrendHistory } from "./hooks/useTrendHistory";
 import type { Info, PatternExplain } from "./types";
 
 export default function App() {
@@ -24,6 +26,7 @@ export default function App() {
   const { snapshot, connected } = useLiveSocket();
   const chat = useChatSocket(logs);
   const train = useTrainSocket();
+  const trends = useTrendHistory(snapshot);
 
   const [info, setInfo] = useState<Info | null>(null);
   const [training, setTraining] = useState(false);
@@ -101,6 +104,7 @@ export default function App() {
           onReset={chat.reset}
         />
         <aside className="brain">
+          <TrendsCard points={trends.points} onClear={trends.clear} />
           <StateCard state={snapshot?.state} />
           <BandBars bands={snapshot?.bands} />
           <QualityGrid quality={snapshot?.quality} />

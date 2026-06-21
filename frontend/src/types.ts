@@ -166,6 +166,23 @@ export interface Snapshot {
   cascade: CascadeStats;
 }
 
+// One downsampled sample of the long-term trend buffer. Combines the ~1 Hz
+// neural-state indices and the relative band powers so a single point fully
+// describes "how the brain looked" at time t. Accumulated client-side by
+// useTrendHistory and rendered by the Neural Trends panel.
+export interface TrendPoint {
+  t: number; // wall-clock seconds (sample time)
+  focus: number;
+  relax: number;
+  engagement: number;
+  quality: number;
+  delta: number;
+  theta: number;
+  alpha: number;
+  beta: number;
+  gamma: number;
+}
+
 export interface PatternMeta {
   name: string;
   balanced_accuracy: number | null;
