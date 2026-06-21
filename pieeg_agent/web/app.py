@@ -246,14 +246,34 @@ def create_app(
         config_path.parent.mkdir(parents=True, exist_ok=True)
         
         try:
+            # Read existing config to preserve fields like api_key
+            existing_config = {}
+            if config_path.exists():
+                try:
+                    with open(config_path, "r") as f:
+                        existing_config = json.load(f)
+                except (json.JSONDecodeError, IOError):
+                    # If config is corrupted/unreadable, start fresh
+                    existing_config = {}
+            
+            # Merge with new values (only update what was provided)
             save_data = {
                 "provider": provider,
                 "version": 2,
             }
+            
+            # Preserve existing api_key if not updating it
             if api_key:
                 save_data["api_key"] = api_key
+            elif "api_key" in existing_config:
+                save_data["api_key"] = existing_config["api_key"]
+            
+            # Update model (or remove if empty/None)
             if model:
                 save_data["model"] = model
+            elif "model" in existing_config and not model:
+                # Keep existing model if no new one provided
+                save_data["model"] = existing_config["model"]
             
             with open(config_path, "w") as f:
                 json.dump(save_data, f, indent=2)
