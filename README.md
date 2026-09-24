@@ -57,6 +57,9 @@ source .venv/bin/activate  # Windows: .venv\Scripts\activate
 
 # Install package
 pip install -e ".[web,dev]"
+
+# MCP mode (Claude, ChatGPT, Codex, Cursor, and other hosts)
+pip install -e ".[mcp]"
 ```
 
 ---
@@ -99,6 +102,180 @@ pieeg-agent ask "am I focused?"
 # Interactive chat
 pieeg-agent chat
 ```
+
+### MCP mode (any external agent)
+
+The host is the agent. PiEEG only serves the live tools. No API key, no built-in model.
+
+Works with Claude, Claude Code, ChatGPT desktop, Codex, Cursor, VS Code, OpenClaw, Hermes, and any other host that accepts an MCP URL or a local command (Grok, Muse, and the rest).
+
+#### 1. Start the server
+
+```bash
+pip install -e ".[mcp]"
+
+# Terminal 1 — LSL stream (hardware, or mock)
+pieeg-server --mock --lsl
+
+# Terminal 2 — MCP server. Leave this running.
+pieeg-agent mcp
+```
+
+URL: `http://127.0.0.1:8765/mcp`
+
+| Flag | What it does |
+| --- | --- |
+| `--transport sse` | Older hosts. URL becomes `http://127.0.0.1:8765/sse` |
+| `--transport stdio` | The host starts this process. Do **not** also run `pieeg-agent mcp` yourself |
+| `--allow-actions` | Expose device tools. They preview only |
+| `--allow-actions --execute` | Device tools actually run |
+| `--host` / `--port` | Bind address (default `127.0.0.1:8765`) |
+
+Cloud chat (chatgpt.com, claude.ai in the browser) cannot see `127.0.0.1`. Use a desktop or CLI host on this machine.
+
+#### 2. Connect a host
+
+Start the LSL stream first in every case. Then either paste the URL (you already started the server) or let the host spawn stdio (do not start the server yourself).
+
+**Cursor**
+
+1. Run step 1.
+2. Create `.cursor/mcp.json` in the project, or `~/.cursor/mcp.json` for every project:
+
+```json
+{
+  "mcpServers": {
+    "pieeg": { "url": "http://127.0.0.1:8765/mcp" }
+  }
+}
+```
+
+3. **Customize** → enable `pieeg`.
+4. Ask: `how's my signal?`
+
+**VS Code (Copilot)**
+
+1. Run step 1.
+2. Create `.vscode/mcp.json`:
+
+```json
+{
+  "servers": {
+    "pieeg": {
+      "type": "http",
+      "url": "http://127.0.0.1:8765/mcp"
+    }
+  }
+}
+```
+
+3. Command Palette → **MCP: List Servers** → start `pieeg`.
+4. In Copilot chat, ask: `am I focused?`
+
+**Claude Code**
+
+1. Run step 1.
+2. Add the server, then open a session:
+
+```bash
+claude mcp add --transport http pieeg http://127.0.0.1:8765/mcp
+claude
+```
+
+3. `/mcp` should show `pieeg` connected.
+4. Ask: `how's my signal?`
+
+**Claude Desktop** — Desktop starts the process. Skip step 1's second terminal. Keep the LSL stream running.
+
+1. **Settings → Developer → Edit Config**
+   - macOS: `~/Library/Application Support/Claude/claude_desktop_config.json`
+   - Windows: `%APPDATA%\Claude\claude_desktop_config.json`
+2. Add this (use the full path to `pieeg-agent` if Desktop says the command was not found):
+
+```json
+{
+  "mcpServers": {
+    "pieeg": {
+      "command": "pieeg-agent",
+      "args": ["mcp", "--transport", "stdio"]
+    }
+  }
+}
+```
+
+3. Quit Claude Desktop completely and reopen it.
+4. Connectors → `pieeg` → ask: `how's my signal?`
+
+**Codex and ChatGPT desktop** — they share `~/.codex/config.toml`.
+
+1. Run step 1.
+2. Add the server:
+
+```bash
+codex mcp add pieeg --url http://127.0.0.1:8765/mcp
+```
+
+Same file by hand:
+
+```toml
+[mcp_servers.pieeg]
+url = "http://127.0.0.1:8765/mcp"
+```
+
+3. Codex: `/mcp`. ChatGPT desktop: new chat, tools should include `pieeg`.
+4. Ask: `am I focused?`
+
+**OpenClaw**
+
+1. Run step 1.
+2. Save and probe:
+
+```bash
+openclaw mcp add pieeg --url http://127.0.0.1:8765/mcp --transport streamable-http
+openclaw mcp doctor pieeg --probe
+```
+
+Or **Settings → MCP → Add server** → Streamable HTTP → `http://127.0.0.1:8765/mcp`.
+3. Ask: `how's my signal?`
+
+**Hermes**
+
+1. Run step 1.
+2. Add to `~/.hermes/config.yaml`:
+
+```yaml
+mcp_servers:
+  pieeg:
+    url: "http://127.0.0.1:8765/mcp"
+```
+
+3. `hermes` (or `/reload-mcp` if a session is already open).
+4. Ask: `how's my signal?`
+
+**Grok, Muse, or any other host**
+
+- URL field: paste `http://127.0.0.1:8765/mcp` after step 1. The app must run on this computer.
+- Command field only: do not run step 1's server. Set command `pieeg-agent`, args `mcp --transport stdio`. LSL stream still has to be up.
+
+#### 3. Try it
+
+```text
+how's my signal?
+am I focused or relaxed?
+list my patterns
+```
+
+The agent should call a tool (`get_neural_state`, `get_channel_quality`, `list_patterns`, …) and answer from that. If it guesses numbers with no tool call, the server is not connected.
+
+Device tools stay hidden unless the server was started with `--allow-actions`. Add `--execute` only when those tools should change the device.
+
+#### Not connecting
+
+- The `pieeg-agent mcp` terminal is still running (URL hosts only).
+- The URL ends in `/mcp`, not just the port.
+- stdio hosts: `pieeg-agent` is on that app's PATH, or you used the full path to the executable.
+- A website in the browser cannot reach `127.0.0.1`. Use the desktop or CLI app.
+- Host only speaks SSE: stop the server and run `pieeg-agent mcp --transport sse`, then use `http://127.0.0.1:8765/sse`.
 
 ### Device Control (PiEEG Server Integration)
 
