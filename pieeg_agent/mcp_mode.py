@@ -206,7 +206,8 @@ def _optional(annotation):
 
     if get_origin(annotation) is Annotated:
         base, *meta = get_args(annotation)
-        return Annotated[Union[base, None], *meta]
+        # Star-unpacking inside [] is a SyntaxError on Python 3.10.
+        return Annotated.__class_getitem__((Union[base, None], *meta))
     return Union[annotation, None]
 
 
