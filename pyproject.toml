@@ -58,8 +58,12 @@ web = [
 # MCP server mode (SDK v2 MCPServer): expose the agent's toolsets so any
 # MCP host (Claude, ChatGPT, Codex, Cursor, Grok, OpenClaw, Hermes, Muse)
 # can call them. Streamable HTTP is the default; SSE and stdio are included.
+# websockets is the same pin as the server extra: --allow-actions connects
+# through ServerControlClient, so the documented `.[mcp]` install must
+# include it.
 mcp = [
     "mcp>=2,<3",
+    "websockets>=12.0",
 ]
 dev = [
     "pytest>=7.0",
