@@ -11,6 +11,7 @@ over that state with a provider-agnostic LLM:
     pieeg-agent ask "am I focused?"        # one-shot brain question
     pieeg-agent chat                       # interactive brain copilot
     pieeg-agent chat --allow-actions       # copilot with gated device control
+    pieeg-agent mcp                        # expose the tools to any MCP host
     pieeg-agent control status             # direct gated server actions
 
 ``ask`` / ``chat`` need an LLM provider configured (e.g. $ANTHROPIC_API_KEY).
@@ -350,6 +351,27 @@ def _build_parser() -> argparse.ArgumentParser:
         "--static-dir", default=None,
         help="Built front-end directory to serve (default: frontend/dist if "
         "present).",
+    )
+
+    p_mcp = sub.add_parser(
+        "mcp", parents=[common],
+        help="Expose the live brain tools to any MCP host (Claude, ChatGPT, "
+        "Codex, Cursor, Grok, OpenClaw, Hermes, Muse). No built-in LLM.",
+    )
+    p_mcp.add_argument(
+        "--transport",
+        choices=("streamable-http", "sse", "stdio"),
+        default="streamable-http",
+        help="How the host connects (default: streamable-http at /mcp). "
+        "Use sse for older hosts, stdio when the host spawns this process.",
+    )
+    p_mcp.add_argument(
+        "--host", default="127.0.0.1",
+        help="Bind address for HTTP transports (default: 127.0.0.1).",
+    )
+    p_mcp.add_argument(
+        "--port", type=int, default=8765,
+        help="Bind port for HTTP transports (default: 8765).",
     )
 
     # ── direct gated server control (Phase 3) ───────────────────────────
@@ -774,7 +796,7 @@ def _connect_eeg_inlet(cfg) -> Any:
 
 @dataclass
 class _CopilotSession:
-    """The assembled live stack shared by ``ask`` / ``chat`` / ``web``."""
+    """The assembled live stack shared by ``ask`` / ``chat`` / ``web`` / ``mcp``."""
 
     copilot: object
     inlet: object
@@ -785,6 +807,7 @@ class _CopilotSession:
     cfg: object
     actions: object = None  # ServerActions when --allow-actions is set
     utility: object = None  # UtilityTools for file/notebook operations
+    tools: object = None  # Combined toolset exposed by ``mcp``
 
 
 def _start_copilot(args) -> _CopilotSession | None:
@@ -1168,6 +1191,168 @@ def _default_static_dir() -> str | None:
     return str(candidate) if candidate.is_dir() else None
 
 
+def _status(message: str) -> None:
+    """MCP status goes to stderr so a stdio host never sees it on the wire."""
+    print(message, file=sys.stderr)
+
+
+def _start_tool_session(args, *, status: Callable[[str], None] = print):
+    """Bring up the live toolset without an LLM.
+
+    MCP hosts are the agent. This connects the EEG stream, starts the
+    perception cascade, and returns the same tool collections ``ask`` / ``chat``
+    use. Device tools stay off unless ``--allow-actions`` is set.
+    """
+    from .agent import (
+        SAFE_ACTIONS,
+        CombinedToolset,
+        DecodeTools,
+        DocumentationTools,
+        NeuralTools,
+        UtilityTools,
+        WebTools,
+    )
+    from .perceive import CascadeConfig, PerceptionCascade
+
+    cfg = AgentConfig.from_env(
+        lsl_name=args.name,
+        lsl_type=args.stype,
+        lsl_resolve_by=args.by,
+        ring_seconds=args.ring_seconds,
+    )
+    client = None
+    actuator = None
+    allow_actions = getattr(args, "allow_actions", False)
+    if allow_actions:
+        actuator, client = _build_actuator(args, cfg, SAFE_ACTIONS)
+        if actuator is None:
+            return None
+
+    inlet = _connect_eeg_inlet(cfg)
+    if inlet is None:
+        if client is not None:
+            client.close()
+        status(
+            "Could not find an EEG stream. Start the producer with:\n"
+            "  pieeg-server --mock --lsl"
+        )
+        return None
+
+    mode = "control" if allow_actions else "read-only"
+    status(
+        f"Tools ready on {inlet.stream_name!r}: {inlet.num_channels} ch @ "
+        f"{inlet.sample_rate:.0f} Hz  ({mode})"
+    )
+    inlet.start()
+    cascade = PerceptionCascade(inlet, CascadeConfig(mains_hz=args.mains))
+    senses = NeuralTools(cascade)
+    decode = DecodeTools(cascade)
+    docs = DocumentationTools()
+    session_metadata = {
+        "stream_name": inlet.stream_name,
+        "channels": {
+            "count": inlet.num_channels,
+            "labels": cascade.channel_labels(),
+        },
+        "sample_rate": inlet.sample_rate,
+        "mains_hz": args.mains,
+        "provider": "mcp-host",
+    }
+    utility = UtilityTools(session_metadata=session_metadata)
+    cascade.set_on_frame(decode.on_frame)
+    cascade.start()
+    if args.warmup > 0:
+        status(f"Warming up ({args.warmup:.0f}s)…")
+        _wait_for_state(cascade, args.warmup)
+
+    web = WebTools()
+    if actuator is not None:
+        utility = UtilityTools(
+            [senses, decode, docs, actuator, web, utility], session_metadata
+        )
+        tools = CombinedToolset(senses, decode, docs, actuator, web, utility)
+    else:
+        utility = UtilityTools(
+            [senses, decode, docs, web, utility], session_metadata
+        )
+        tools = CombinedToolset(senses, decode, docs, web, utility)
+    return _CopilotSession(
+        copilot=None,
+        inlet=inlet,
+        cascade=cascade,
+        client=client,
+        senses=senses,
+        decode=decode,
+        cfg=cfg,
+        utility=utility,
+        tools=tools,
+    )
+
+
+def cmd_mcp(args) -> int:
+    """Serve the live tools to any MCP host. This process is not the LLM."""
+    from .mcp_mode import (
+        INSTRUCTIONS,
+        client_config,
+        endpoint_for,
+        missing_sdk_message,
+        serve_toolset,
+    )
+
+    try:
+        import mcp  # noqa: F401
+    except ImportError:
+        _status(missing_sdk_message())
+        return 2
+
+    # stdio hosts parse stdout as the protocol. Keep discovery banners off it.
+    if args.transport == "stdio":
+        saved_stdout = sys.stdout
+        sys.stdout = sys.stderr
+        try:
+            started = _start_tool_session(args, status=_status)
+        finally:
+            sys.stdout = saved_stdout
+    else:
+        started = _start_tool_session(args, status=_status)
+    if started is None:
+        return 1
+
+    url = endpoint_for(args.transport, args.host, args.port)
+    _status("\nPiEEG MCP server  (Ctrl+C to stop)")
+    _status("Hosts: Claude, ChatGPT, Codex, Cursor, Grok, OpenClaw, Hermes, Muse.")
+    if url:
+        _status(f"Endpoint: {url}")
+    else:
+        _status("Transport: stdio — the host owns this process's stdin/stdout.")
+    if started.client is None:
+        _status("Device control: off. Pass --allow-actions to expose gated actions.")
+    elif not getattr(args, "execute", False):
+        _status("Device control: dry-run. Pass --execute to perform actions.")
+    else:
+        _status("Device control: execute.")
+    _status("Host config:\n" + client_config(args.transport, args.host, args.port))
+
+    control = " Gated device tools are available." if started.client is not None else ""
+    try:
+        serve_toolset(
+            started.tools,
+            transport=args.transport,
+            host=args.host,
+            port=args.port,
+            instructions=INSTRUCTIONS + control,
+            version=__version__,
+        )
+    except KeyboardInterrupt:
+        pass
+    finally:
+        started.cascade.stop()
+        started.inlet.stop()
+        if started.client is not None:
+            started.client.close()
+    return 0
+
+
 def cmd_web(args) -> int:
     """Serve the graphical web UI over the same copilot + cascade as the CLI."""
     try:
@@ -1497,6 +1682,8 @@ def main(argv: list[str] | None = None) -> int:
         return cmd_chat(args)
     if args.command == "web":
         return cmd_web(args)
+    if args.command == "mcp":
+        return cmd_mcp(args)
     if args.command == "control":
         return cmd_control(args)
     if args.command == "config":
