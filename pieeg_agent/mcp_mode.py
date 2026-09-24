@@ -201,14 +201,21 @@ def _annotation(prop: dict):
 
 
 def _optional(annotation):
-    """Make a generated annotation accept an omitted argument."""
+    """Make a generated annotation accept an omitted argument.
+
+    Metadata stays on the outside (``Annotated[T | None, Field(...)]``). That
+    form is built one argument at a time: a star inside ``[]`` is a syntax
+    error on 3.10, and ``Annotated.__class_getitem__`` is hidden on 3.13.
+    """
     from typing import Annotated, Union, get_args, get_origin
 
-    if get_origin(annotation) is Annotated:
-        base, *meta = get_args(annotation)
-        # Star-unpacking inside [] is a SyntaxError on Python 3.10.
-        return Annotated.__class_getitem__((Union[base, None], *meta))
-    return Union[annotation, None]
+    if get_origin(annotation) is not Annotated:
+        return Union[annotation, None]
+    base, *meta = get_args(annotation)
+    wrapped = Union[base, None]
+    for item in meta:
+        wrapped = Annotated[wrapped, item]
+    return wrapped
 
 
 def _python_type(prop: dict, literal_type):
